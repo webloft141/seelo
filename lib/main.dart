@@ -1252,6 +1252,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showingPopup = false;
   bool _showSystemUi = false;
   bool _showIssues = true;
+  bool _showSafeArea = false;
+  bool _showGrid = false;
   bool _showToolbar = true;
   bool _wasInBackground = false;
   Timer? _toolbarTimer;
@@ -1345,6 +1347,20 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                     setInner(() => localShowUi = v);
                     setState(() => _showSystemUi = v);
                     _applySystemUiMode();
+                  }),
+                  const SizedBox(height: 16),
+                  const Text('Overlays', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  _settingToggle('Issue Highlighting', 'Show overflow/overlap warnings', _showIssues, (v) {
+                    setState(() => _showIssues = v);
+                  }),
+                  const SizedBox(height: 8),
+                  _settingToggle('Safe Area', 'Visualize safe zone boundaries', _showSafeArea, (v) {
+                    setState(() => _showSafeArea = v);
+                  }),
+                  const SizedBox(height: 8),
+                  _settingToggle('Pixel Grid', '8×8 px alignment grid', _showGrid, (v) {
+                    setState(() => _showGrid = v);
                   }),
                   const SizedBox(height: 16),
                   const Text('Display Mode', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
@@ -1553,6 +1569,50 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     );
   }
 
+  Widget _buildSafeAreaOverlay(FrameMetadata meta, double renderW, double renderH) {
+    const topInset = 0.08;  // 8% of frame height for top safe area
+    const bottomInset = 0.05; // 5% of frame height for bottom safe area
+    final sh = renderH;
+    final sw = renderW;
+    return Stack(
+      children: [
+        Positioned(
+          top: 0, left: 0, width: sw, height: sh * topInset,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: const Color(0xAA22C55E), width: 2)),
+              color: const Color(0x2222C55E),
+            ),
+            child: const Center(child: Text('SAFE', style: TextStyle(color: Color(0xAA22C55E), fontSize: 9, fontWeight: FontWeight.w700))),
+          ),
+        ),
+        Positioned(
+          bottom: 0, left: 0, width: sw, height: sh * bottomInset,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: const Color(0xAA22C55E), width: 2)),
+              color: const Color(0x2222C55E),
+            ),
+            child: const Center(child: Text('SAFE', style: TextStyle(color: Color(0xAA22C55E), fontSize: 9, fontWeight: FontWeight.w700))),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGridOverlay(FrameMetadata meta, double renderW, double renderH) {
+    const cellSize = 8; // 8x8 px grid cells in design coordinates
+    if (meta.frameWidth <= 0 || meta.frameHeight <= 0) return const SizedBox.shrink();
+    final cols = (meta.frameWidth / cellSize).ceil();
+    final rows = (meta.frameHeight / cellSize).ceil();
+    final scaleX = renderW / meta.frameWidth;
+    final scaleY = renderH / meta.frameHeight;
+    return CustomPaint(
+      size: Size(renderW, renderH),
+      painter: _GridPainter(cols, rows, cellSize * scaleX, cellSize * scaleY),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1685,6 +1745,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               ),
                             ),
                             if (_showIssues) _buildIssueOverlay(meta, renderWidth, renderHeight),
+                            if (_showSafeArea) _buildSafeAreaOverlay(meta, renderWidth, renderHeight),
+                            if (_showGrid) _buildGridOverlay(meta, renderWidth, renderHeight),
                           ],
                         ),
                       ),
@@ -1725,6 +1787,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               gaplessPlayback: true,
                             ),
                             if (_showIssues) _buildIssueOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (_showSafeArea) _buildSafeAreaOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (_showGrid) _buildGridOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                           ],
                         ),
                       ),
@@ -1937,6 +2001,34 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
       ),
     );
   }
+}
+
+class _GridPainter extends CustomPainter {
+  final int cols;
+  final int rows;
+  final double cellW;
+  final double cellH;
+
+  _GridPainter(this.cols, this.rows, this.cellW, this.cellH);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0x3322C55E)
+      ..strokeWidth = 0.5;
+    for (int i = 0; i <= cols; i++) {
+      final x = i * cellW;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (int i = 0; i <= rows; i++) {
+      final y = i * cellH;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GridPainter old) =>
+      old.cols != cols || old.rows != rows || old.cellW != cellW || old.cellH != cellH;
 }
 
 Widget _card({required Widget child}) {
