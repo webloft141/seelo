@@ -175,6 +175,9 @@
                         <span class="cloud-viewer-count" id="lbl-viewer-count">0 viewers</span>
                         <span class="ml-auto cloud-viewer-count" id="lbl-cloud-status">Waiting for design...</span>
                     </div>
+                    <div style="text-align:center;padding:4px 0;">
+                        <img id="cloud-qr" src="" style="width:140px;height:140px;border-radius:8px;background:var(--bg);display:none;" />
+                    </div>
                     <button class="btn-s" id="btn-cloud-sync" onclick="triggerCloudSync()" style="font-size:10px;">Sync Now</button>
                 </div>
             </div>
@@ -398,6 +401,13 @@
 
             const link = relayUrl + '/viewer.html?sessionId=' + cloudSessionId;
             document.getElementById('share-link').value = link;
+
+            // QR code for mobile app: JSON with relay URL + sessionId
+            const qrData = JSON.stringify({relay: relayUrl, sessionId: cloudSessionId});
+            const qrImg = document.getElementById('cloud-qr');
+            qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=' + encodeURIComponent(qrData);
+            qrImg.style.display = 'inline-block';
+            qrImg.onerror = function() { this.style.display = 'none'; };
 
             connectCloudRelay();
             setCloudStatus('Connecting...', '');

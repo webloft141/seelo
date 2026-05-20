@@ -165,7 +165,112 @@ class SeeloConnectionController {
     _connectWithPayloadInternal(payload, onConnected: onConnected, onError: onError, onStatus: onStatus);
   }
 
+  void _connectToRelay(String relayUrl, String sessionId, {VoidCallback? onConnected, void Function(String message)? onError, void Function(String message)? onStatus}) {
+    if (relayUrl.isEmpty || sessionId.isEmpty) {
+      onError?.call('Invalid relay link');
+      return;
+    }
+    connecting = true;
+    connectionQuality.value = ConnectionQuality.disconnected;
+    serverLabel = 'Cloud';
+    onStatus?.call('Connecting to cloud...');
+
+    _socket?.disconnect();
+    _socket?.dispose();
+    _pingTimer?.cancel();
+
+    final config = SeeloConfig();
+    final socket = io.io(
+      relayUrl,
+      io.OptionBuilder()
+          .setTransports(['websocket'])
+          .enableReconnection()
+          .setReconnectionAttempts(config.reconnectAttempts)
+          .setReconnectionDelay(config.reconnectDelay)
+          .setReconnectionDelayMax(3000)
+          .setTimeout(config.connectTimeout)
+          .build(),
+    );
+    _socket = socket;
+
+    socket.onConnect((_) {
+      if (_disposed) return;
+      connecting = false;
+      _reconnectCount = 0;
+      connectionQuality.value = ConnectionQuality.good;
+      socket.emit('join-session', {'sessionId': sessionId, 'role': 'viewer'});
+      onConnected?.call();
+      onStatus?.call('Cloud connected');
+    });
+
+    socket.on('cloud-design', (payload) {
+      if (_disposed) return;
+      try {
+        final design = payload is Map ? payload : null;
+        if (design is Map) {
+          final imageData = design['imageData'];
+          final newId = design['id']?.toString();
+          if (imageData is String && imageData.startsWith('data:image')) {
+            _lastFrameId = newId;
+            currentImageData = imageData;
+            currentMetadata = FrameMetadata(
+              id: newId,
+              projectId: design['projectId']?.toString(),
+              frameWidth: (design['width'] ?? 0).toDouble(),
+              frameHeight: (design['height'] ?? 0).toDouble(),
+              exportScale: (design['exportScale'] ?? 2).toDouble(),
+              backgroundColor: design['backgroundColor']?.toString(),
+              textLayers: (design['textLayers'] is List ? List<Map<String, dynamic>>.from(design['textLayers'].map((e) => Map<String, dynamic>.from(e))) : []),
+              videoLayers: (design['videoLayers'] is List ? List<Map<String, dynamic>>.from(design['videoLayers'].map((e) => Map<String, dynamic>.from(e))) : []),
+              imageData: imageData,
+            );
+            metadataNotifier.value = currentMetadata;
+            imageVersion.value++;
+          }
+        }
+      } catch (_) {}
+      _designTimeout?.cancel();
+      onStatus?.call('Preview synced');
+    });
+
+    socket.onConnectError((err) {
+      if (_disposed) return;
+      connecting = false;
+      _reconnectCount++;
+      connectionQuality.value = ConnectionQuality.poor;
+      onError?.call('Connection failed ($_reconnectCount)');
+      onStatus?.call('Retrying...');
+    });
+
+    socket.onDisconnect((_) {
+      if (_disposed) return;
+      connectionQuality.value = ConnectionQuality.disconnected;
+      onStatus?.call('Disconnected');
+    });
+
+    socket.onReconnect((_) {
+      if (_disposed) return;
+      connectionQuality.value = ConnectionQuality.good;
+      socket.emit('join-session', {'sessionId': sessionId, 'role': 'viewer'});
+      onStatus?.call('Reconnected');
+    });
+
+    _designTimeout?.cancel();
+    _designTimeout = Timer(const Duration(seconds: 15), () {
+      if (_disposed) return;
+      if (currentImageData == null) {
+        onError?.call('No design received. Click SYNC in plugin.');
+        onStatus?.call('Waiting for design...');
+      }
+    });
+  }
+
   void _connectWithPayloadInternal(Map<String, dynamic> payload, {VoidCallback? onConnected, void Function(String message)? onError, void Function(String message)? onStatus}) {
+    final relay = (payload['relay'] ?? '').toString().trim();
+    if (relay.isNotEmpty) {
+      _connectToRelay(relay, (payload['sessionId'] ?? '').toString(), onConnected: onConnected, onError: onError, onStatus: onStatus);
+      return;
+    }
     final ip = (payload['ip'] ?? '').toString().trim();
     final port = int.tryParse((payload['port'] ?? SeeloConfig().defaultPort).toString()) ?? SeeloConfig().defaultPort;
     roomId = (payload['roomId'] ?? SeeloConfig().defaultRoomId).toString();
