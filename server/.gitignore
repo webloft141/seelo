@@ -1,0 +1,6 @@
+node_modules/
+seelo.db
+seelo.db-wal
+seelo.db-shm
+*.log
+.env

@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        :root {
+            --bg: #d4d4d4;
+            --surface: #f0f0f0;
+            --border: #b0b0b0;
+            --text: #111111;
+            --text-sec: #444444;
+            --text-dim: #666666;
+            --success: #22c55e;
+            --error: #ef4444;
+            --radius: 8px;
+            --radius-sm: 6px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow-y: auto;
+            overflow-x: hidden;
+            font-size: 13px;
+        }
+        .app { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+        .head { display: flex; align-items: center; gap: 6px; }
+        .head-logo { width: 28px; height: 28px; border-radius: 6px; }
+        .head-title { font-size: 15px; font-weight: 600; flex: 1; letter-spacing: -0.2px; }
+        .head-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 18px; line-height: 1; padding: 0 2px; }
+        .head-btn:hover { color: var(--text); }
+
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+        .card-row { display: flex; align-items: center; gap: 8px; }
+        .card-title { font-size: 13px; font-weight: 600; }
+        .card-sub { font-size: 11px; color: var(--text-sec); line-height: 1.4; }
+        .card-divider { height: 1px; background: var(--border); margin: 0; }
+
+        .conn-status { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+        .conn-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .conn-dot.green { background: var(--success); }
+        .conn-dot.red { background: #a33; }
+        .conn-dot.gray { background: var(--text-dim); }
+        .conn-ip { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+
+        .btn-p { background: var(--text); color: var(--bg); border: none; padding: 10px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.1s; width: 100%; text-align: center; }
+        .btn-p:hover { opacity: 0.85; }
+        .btn-s { background: transparent; border: 1px solid var(--border); color: var(--text-sec); padding: 9px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 500; cursor: pointer; transition: 0.1s; width: 100%; text-align: center; }
+        .btn-s:hover { background: var(--accent-bg); color: var(--text); }
+        .mode-group { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .mode-btn { flex: 1; padding: 8px; border: none; background: var(--surface); color: var(--text-sec); font-size: 12px; font-weight: 600; cursor: pointer; transition: 0.1s; }
+        .mode-btn.active { background: var(--text); color: var(--bg); }
+        .mode-btn:not(.active):hover { background: var(--border); }
+        .cloud-link-box { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; word-break: break-all; }
+        .cloud-link-box input { flex: 1; border: none; background: transparent; color: var(--text); font-size: 11px; outline: none; }
+        .cloud-viewer-count { font-size: 11px; color: var(--text-dim); }
+        .section-divider { height: 1px; background: var(--border); margin: 6px 0; }
+
+        .dev-list { display: flex; flex-direction: column; gap: 4px; min-height: 32px; }
+        .dev-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; background: var(--surface); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+        .dev-icon { font-size: 14px; }
+        .dev-info { flex: 1; min-width: 0; }
+        .dev-name { font-size: 12px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .dev-meta { font-size: 10px; color: var(--text-dim); }
+        .dev-empty { font-size: 11px; color: var(--text-dim); text-align: center; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+
+        .model-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+        .model-chip { padding: 5px 10px; border: 1px solid var(--border); border-radius: 12px; font-size: 10px; color: var(--text-sec); cursor: pointer; background: transparent; }
+        .model-chip.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+        .model-chip:hover:not(.active) { border-color: var(--text-dim); }
+
+        .footer { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 10px; color: var(--text-dim); }
+        .footer a { color: var(--text-sec); text-decoration: none; }
+        .footer a:hover { color: var(--text); text-decoration: underline; }
+        .footer .sep { color: var(--border); }
+        .footer .no-link { color: var(--text-dim); }
+
+        #collapsed-view { display: none; width: 40px; height: 40px; background: var(--text); color: var(--bg); border-radius: 8px; cursor: pointer; align-items: center; justify-content: center; font-weight: 800; font-size: 17px; }
+        .hidden { display: none !important; }
+        .ml-auto { margin-left: auto; }
+    </style>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" onerror="fallbackSocketIO()"></script>
+    <script>
+        function fallbackSocketIO() {
+            var s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js';
+            s.onerror = function() {
+                document.getElementById('footer-status').innerText = 'Socket.io CDN failed';
+                var s2 = document.createElement('script');
+                s2.src = 'https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js';
+                s2.onerror = function() {
+                    document.getElementById('footer-status').innerText = 'CDN unavailable';
+                };
+                document.head.appendChild(s2);
+            };
+            document.head.appendChild(s);
+        }
+    </script>
+</head>
+<body>
+    <div id="full-view" class="app">
+        <div class="head">
+            <img class="head-logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAHGSURBVFhH7ZQxTsNAEEX9HECJO0RKn4MrcQRuQJ2OK3AEOAIloaKk4gJcAokDcAQkRBSJXTnSV6J1lF27mzW7kR0p0k9e2Zv5M+PVeg0zmUwmk8lk/pMkWeDhcARBEIA8z5FlGZIkgbZtoeu6sCwLqqqCEALGccRiDrK5bZqGcRzhOA6iKMJ0Om05ThRFGIYBiqJA13VkWYau60LXdWFZFpRSMMaQZdlfCwCgKAqYpglKKQghMBgM0HXdYhzXdTEYDEAphWVZqKoqSim4ros4jsE5/1UB27aRZRmSJIFS6k8BwzCgaRoopZBSCtM0UZblx8lFUay2OwEl5R8BIYQQQjgcDovFYrG4Xq8Xj8fjYhwWQgiHwyGEECCEgDEGSilyztfWF1BKQQiBcRwhhMCHQAhBWZawbRtCCFBKoTQNA3zf/7UQ5xz7/R5SSsRxjCzLIISAYRgLhBDKsoRSCsYYGGNQSoFSijRNYVmWEkKgLEtIKdF1HYIgQFEU0DQN0zTBsiyKooAQAs55swn4vo+madA0DVzXRV3XaJoG0zQhTdMfFpqmQdM0qOsat9vtD4au62CaJgghMAwDvu9jHMcPE0qp9S7Yj3Q6nR8H3W6343FvPc/jNE2byWQymUwm8+8H3xAxBP+4mAYlAAAAAElFTkSuQmCC">
+            <span class="head-title">Seelo</span>
+            <button class="head-btn" onclick="toggleCollapse()">—</button>
+        </div>
+
+        <!-- Mode Toggle -->
+        <div class="mode-group">
+            <button class="mode-btn active" id="mode-local" onclick="setMode('local')">Local</button>
+            <button class="mode-btn" id="mode-cloud" onclick="setMode('cloud')">Cloud</button>
+        </div>
+
+        <!-- Local Section -->
+        <div id="local-section">
+        <!-- Desktop Connection -->
+        <div class="card">
+            <div class="card-row">
+                <span class="conn-dot red" id="dot-desktop"></span>
+                <span class="conn-status" id="lbl-desktop">Desktop</span>
+                <span class="conn-ip ml-auto" id="lbl-ip">127.0.0.1:3000</span>
+            </div>
+            <div class="card-row" style="margin-top:4px;">
+                <input id="server-url" class="text-input" value="127.0.0.1:3000" placeholder="Server address" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:11px;" />
+                <button class="btn-s" style="width:auto;padding:6px 10px;" onclick="applyServerUrl()">Apply</button>
+            </div>
+        </div>
+
+        <!-- Device List -->
+        <div class="card">
+            <div class="card-title">Connected Devices</div>
+            <div class="dev-list" id="dev-list">
+                <div class="dev-empty">No devices connected</div>
+            </div>
+        </div>
+
+        <!-- Preview Model -->
+        <div class="card">
+            <div class="card-title">Preview Device</div>
+            <div class="model-grid">
+                <span class="model-chip active" onclick="selectModel(this)">Pixel 8</span>
+                <span class="model-chip" onclick="selectModel(this)">iPhone 15</span>
+                <span class="model-chip" onclick="selectModel(this)">Galaxy S24</span>
+                <span class="model-chip" onclick="selectModel(this)">iPhone SE</span>
+                <span class="model-chip" onclick="selectModel(this)">iPad Mini</span>
+                <span class="model-chip" onclick="selectModel(this)">Custom</span>
+            </div>
+        </div>
+
+        <!-- Navigation -->
+        <div class="card-row" style="gap:4px;">
+            <button class="btn-s" onclick="navigateFrame('prev')" style="flex:1;">← Prev</button>
+            <button class="btn-s" onclick="navigateFrame('next')" style="flex:1;">Next →</button>
+        </div>
+
+        </div><!-- end local-section -->
+
+        <!-- Cloud Section -->
+        <div id="cloud-section" class="hidden">
+            <div class="card">
+                <div class="card-row"><span class="card-title">Cloud Sharing</span></div>
+                <div class="card-sub">Share a live preview link with anyone over the internet.</div>
+                <div class="section-divider"></div>
+                <button class="btn-p" id="btn-start-cloud" onclick="startCloudSession()">Generate Share Link</button>
+                <div id="cloud-active" class="hidden">
+                    <div class="card-row">
+                        <span class="conn-dot green" id="dot-cloud"></span>
+                        <span class="conn-status" id="lbl-cloud">Cloud sync active</span>
+                    </div>
+                    <div class="cloud-link-box">
+                        <input id="share-link" readonly value="" />
+                        <button class="btn-s" style="width:auto;padding:4px 10px;white-space:nowrap;" onclick="copyShareLink()">Copy</button>
+                    </div>
+                    <div class="card-row" style="gap:4px;">
+                        <span class="cloud-viewer-count" id="lbl-viewer-count">0 viewers</span>
+                        <span class="ml-auto cloud-viewer-count" id="lbl-cloud-status">Waiting for design...</span>
+                    </div>
+                    <button class="btn-s" id="btn-cloud-sync" onclick="triggerCloudSync()" style="font-size:10px;">Sync Now</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <span id="footer-status">Ready</span>
+            <span class="sep" id="sep1">·</span>
+            <span class="no-link" id="lbl-mode-indicator">Local</span>
+        </div>
+    </div>
+
+    <div id="collapsed-view" onclick="toggleCollapse()"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAHGSURBVFhH7ZQxTsNAEEX9HECJO0RKn4MrcQRuQJ2OK3AEOAIloaKk4gJcAokDcAQkRBSJXTnSV6J1lF27mzW7kR0p0k9e2Zv5M+PVeg0zmUwmk8lk/pMkWeDhcARBEIA8z5FlGZIkgbZtoeu6sCwLqqqCEALGccRiDrK5bZqGcRzhOA6iKMJ0Om05ThRFGIYBiqJA13VkWYau60LXdWFZFpRSMMaQZdlfCwCgKAqYpglKKQghMBgM0HXdYhzXdTEYDEAphWVZqKoqSim4ros4jsE5/1UB27aRZRmSJIFS6k8BwzCgaRoopZBSCtM0UZblx8lFUay2OwEl5R8BIYQQQjgcDovFYrG4Xq8Xj8fjYhwWQgiHwyGEECCEgDEGSilyztfWF1BKQQiBcRwhhMCHQAhBWZawbRtCCFBKoTQNA3zf/7UQ5xz7/R5SSsRxjCzLIISAYRgLhBDKsoRSCsYYGGNQSoFSijRNYVmWEkKgLEtIKdF1HYIgQFEU0DQN0zTBsiyKooAQAs55swn4vo+madA0DVzXRV3XaJoG0zQhTdMfFpqmQdM0qOsat9vtD4au62CaJgghMAwDvu9jHMcPE0qp9S7Yj3Q6nR8H3W6343FvPc/jNE2byWQymUwm8+8H3xAxBP+4mAYlAAAAAElFTkSuQmCC"></div>
+
+    <script>
+        let desktopSocket;
+        let desktopConnected = false;
+        let isCollapsed = false;
+        let heartbeatTimer = null;
+        let connectIndex = 0;
+        let roomSecret = '';
+        let socketTargets = [
+            'http://127.0.0.1:3000',
+            'http://localhost:3000'
+        ];
+
+        function applyServerUrl() {
+            const val = document.getElementById('server-url').value.trim();
+            if (!val) return;
+            const url = val.startsWith('http') ? val : 'http://' + val;
+            socketTargets = [url];
+            connectIndex = 0;
+            if (desktopSocket) {
+                try { desktopSocket.disconnect(); } catch(e) {}
+            }
+            setupDesktopSocket();
+        }
+
+        const $ = id => document.getElementById(id);
+
+        function fitHeight() {
+            const h = $('full-view').scrollHeight;
+            const targetHeight = Math.min(Math.max(h + 10, 420), 760);
+            parent.postMessage({ pluginMessage: { type: 'resize', width: 340, height: targetHeight } }, '*');
+        }
+
+        function setDot(el, state) {
+            el.className = 'conn-dot ' + state;
+        }
+
+        // --- Desktop Socket ---
+        function setupDesktopSocket() {
+            const target = socketTargets[connectIndex % socketTargets.length];
+            connectIndex += 1;
+            const displayIp = target.replace('http://', '');
+            $('lbl-ip').innerText = displayIp;
+            $('server-url').value = displayIp;
+            try {
+                desktopSocket = io(target, {
+                    transports: ['websocket', 'polling'],
+                    reconnection: true,
+                    reconnectionAttempts: Infinity,
+                    reconnectionDelay: 900,
+                    reconnectionDelayMax: 3000,
+                    timeout: 10000
+                });
+            } catch(e) { return; }
+            desktopSocket.on('connect', () => {
+                desktopSocket.emit('join-room', { roomId: 'seelo-desktop', roomSecret: '', role: 'plugin', protocol: '1.1.0' });
+                desktopConnected = true;
+                setDot($('dot-desktop'), 'green');
+                $('lbl-desktop').innerText = 'Desktop connected';
+                parent.postMessage({ pluginMessage: { type: 'manual-sync' } }, '*');
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+                heartbeatTimer = setInterval(() => {
+                    if (desktopSocket && desktopSocket.connected) {
+                        desktopSocket.emit('plugin-heartbeat', { ts: Date.now(), protocol: '1.1.0' });
+                    }
+                }, 1000);
+            });
+            desktopSocket.on('room-registered', (data) => {
+                if (data && data.roomSecret) {
+                    roomSecret = data.roomSecret;
+                }
+            });
+            desktopSocket.on('join-ack', () => {
+                $('footer-status').innerText = 'Secure link established';
+                setTimeout(() => { $('footer-status').innerText = 'Ready'; }, 1200);
+            });
+            desktopSocket.on('disconnect', () => {
+                desktopConnected = false;
+                setDot($('dot-desktop'), 'red');
+                $('lbl-desktop').innerText = 'Desktop disconnected';
+                if (heartbeatTimer) {
+                    clearInterval(heartbeatTimer);
+                    heartbeatTimer = null;
+                }
+            });
+            desktopSocket.on('connect_error', () => {
+                desktopConnected = false;
+                setDot($('dot-desktop'), 'red');
+                $('lbl-desktop').innerText = 'Desktop offline';
+                try { desktopSocket.disconnect(); } catch (e) {}
+                setTimeout(setupDesktopSocket, 1200);
+            });
+            desktopSocket.on('desktop-command', (msg) => {
+                parent.postMessage({ pluginMessage: { type: 'desktop-command', command: msg.type, frameId: msg.frameId } }, '*');
+                if (desktopSocket && desktopSocket.connected) {
+                    desktopSocket.emit('command-ack', { type: msg.type, at: Date.now() });
+                }
+            });
+            desktopSocket.on('design-changed', () => {
+                parent.postMessage({ pluginMessage: { type: 'manual-sync' } }, '*');
+            });
+            desktopSocket.on('mobile-connected', (data) => {
+                addDevice(data.socketId || '', data.deviceName || 'Device', (data.screenWidth && data.screenHeight) ? data.screenWidth + '\u00D7' + data.screenHeight : '');
+            });
+            desktopSocket.on('mobile-disconnected', (socketId) => {
+                connectedDevices = connectedDevices.filter(d => d.socketId !== socketId);
+                renderDevices();
+                fitHeight();
+            });
+            desktopSocket.on('mobile-list', (items) => {
+                if (!Array.isArray(items)) return;
+                connectedDevices = items.map(d => ({
+                    socketId: d.socketId || '',
+                    name: d.deviceName || 'Device',
+                    screen: (d.screenWidth && d.screenHeight) ? (d.screenWidth + '\u00D7' + d.screenHeight) : ''
+                }));
+                renderDevices();
+                fitHeight();
+            });
+            desktopSocket.on('resize-request', (data) => {
+                parent.postMessage({ pluginMessage: { type: 'resize-frame', width: data.width, height: data.height, name: data.name } }, '*');
+            });
+            desktopSocket.on('frame-navigation', (data) => {
+                parent.postMessage({ pluginMessage: { type: 'navigate-frame', direction: data.direction } }, '*');
+            });
+            desktopSocket.on('error-msg', (data) => {
+                $('footer-status').innerText = data.message || 'Error';
+                setTimeout(() => { $('footer-status').innerText = 'Ready'; }, 4000);
+            });
+        }
+
+        // --- Device List ---
+        let connectedDevices = [];
+        function addDevice(socketId, name, screen) {
+            const exists = connectedDevices.some(d => d.socketId === socketId);
+            if (!exists) connectedDevices.push({ socketId, name, screen });
+            renderDevices();
+            fitHeight();
+        }
+        function clearDevices() {
+            connectedDevices = [];
+            renderDevices();
+            fitHeight();
+        }
+        function renderDevices() {
+            const list = $('dev-list');
+            if (connectedDevices.length === 0) {
+                list.innerHTML = '<div class="dev-empty">No devices connected</div>';
+                return;
+            }
+            list.innerHTML = connectedDevices.map(d =>
+                `<div class="dev-item">
+                    <span class="dev-icon">📱</span>
+                    <div class="dev-info">
+                        <div class="dev-name">${d.name.replace(/</g,'&lt;')}</div>
+                        <div class="dev-meta">${d.screen ? d.screen : ''}</div>
+                    </div>
+                </div>`
+            ).join('');
+        }
+
+        // --- Preview Model ---
+        function selectModel(el) {
+            document.querySelectorAll('.model-chip').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            parent.postMessage({ pluginMessage: { type: 'set-preview-model', model: el.innerText } }, '*');
+        }
+
+        // --- Navigation ---
+        function navigateFrame(direction) {
+            parent.postMessage({ pluginMessage: { type: 'navigate-frame', direction } }, '*');
+        }
+
+        // --- Mode Toggle ---
+        let currentMode = 'local';
+        let cloudSessionId = '';
+        let cloudViewers = {};
+        let lastCloudData = null;
+        let cloudWriteTimer = null;
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('mode-' + mode).classList.add('active');
+            if (mode === 'local') {
+                document.getElementById('local-section').classList.remove('hidden');
+                document.getElementById('cloud-section').classList.add('hidden');
+            } else {
+                document.getElementById('local-section').classList.add('hidden');
+                document.getElementById('cloud-section').classList.remove('hidden');
+            }
+            document.getElementById('lbl-mode-indicator').innerText = mode.charAt(0).toUpperCase() + mode.slice(1);
+            setTimeout(fitHeight, 50);
+        }
+
+        // --- Cloud Sharing ---
+        let cloudSocket = null;
+        let cloudSyncTimer = null;
+        let cloudDataReceived = false;
+        let relayUrl = 'http://localhost:3001'; // Change to deployed Railway URL when ready
+
+        function startCloudSession() {
+            cloudSessionId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+            cloudDataReceived = false;
+            document.getElementById('btn-start-cloud').classList.add('hidden');
+            document.getElementById('cloud-active').classList.remove('hidden');
+
+            const link = relayUrl + '/viewer.html?sessionId=' + cloudSessionId;
+            document.getElementById('share-link').value = link;
+
+            connectCloudRelay();
+            setCloudStatus('Connecting...', '');
+            setTimeout(fitHeight, 50);
+        }
+
+        function connectCloudRelay() {
+            if (cloudSocket) { try { cloudSocket.disconnect(); } catch(e) {} }
+            try {
+                cloudSocket = io(relayUrl, { transports: ['websocket', 'polling'], timeout: 8000 });
+            } catch(e) {
+                setCloudStatus('Relay error');
+                return;
+            }
+            cloudSocket.on('connect', () => {
+                cloudSocket.emit('join-session', { sessionId: cloudSessionId, role: 'plugin' });
+                setCloudStatus('Waiting for design...', '');
+                if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+                cloudSyncTimer = setTimeout(() => {
+                    if (!cloudDataReceived) setCloudStatus('Select any frame in Figma to start', '');
+                }, 5000);
+                parent.postMessage({ pluginMessage: { type: 'manual-sync' } }, '*');
+            });
+            cloudSocket.on('disconnect', () => {
+                setCloudStatus('Disconnected');
+                cloudDataReceived = false;
+            });
+            cloudSocket.on('connect_error', () => {
+                setCloudStatus('Relay offline');
+            });
+            cloudSocket.on('viewer-count', (count) => {
+                document.getElementById('lbl-viewer-count').innerText = count + ' viewer' + (count !== 1 ? 's' : '');
+            });
+        }
+
+        function triggerCloudSync() {
+            setCloudStatus('Syncing...', '');
+            if (cloudSocket && cloudSocket.connected) {
+                cloudDataReceived = false;
+                if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+                cloudSyncTimer = setTimeout(() => {
+                    if (!cloudDataReceived) setCloudStatus('Select any frame in Figma', '');
+                }, 5000);
+                parent.postMessage({ pluginMessage: { type: 'manual-sync' } }, '*');
+            } else {
+                setCloudStatus('Not connected');
+                connectCloudRelay();
+            }
+        }
+
+        function setCloudStatus(text, fallback) {
+            document.getElementById('lbl-cloud-status').innerText = text || fallback || 'Waiting...';
+        }
+
+        function copyShareLink() {
+            const input = document.getElementById('share-link');
+            input.select();
+            try {
+                document.execCommand('copy');
+                document.getElementById('footer-status').innerText = 'Link copied!';
+                setTimeout(() => { document.getElementById('footer-status').innerText = 'Ready'; }, 2000);
+            } catch (e) {
+                document.getElementById('footer-status').innerText = 'Copy failed';
+            }
+        }
+
+        // --- Collapse ---
+        function toggleCollapse() {
+            isCollapsed = !isCollapsed;
+            if (isCollapsed) {
+                $('full-view').style.display = 'none';
+                $('collapsed-view').style.display = 'flex';
+                parent.postMessage({ pluginMessage: { type: 'resize', width: 36, height: 36 } }, '*');
+            } else {
+                $('full-view').style.display = 'flex';
+                $('collapsed-view').style.display = 'none';
+                setTimeout(fitHeight, 50);
+            }
+        }
+
+        // --- Init ---
+        setupDesktopSocket();
+        setTimeout(fitHeight, 100);
+
+        // --- Messages from code.js ---
+        window.onmessage = (event) => {
+            if (!event.data || !event.data.pluginMessage) return;
+            const { type, data } = event.data.pluginMessage;
+            if (type === 'selection-updated') {
+                if (desktopSocket && desktopSocket.connected) {
+                    desktopSocket.emit('design-update', data);
+                }
+                if (currentMode === 'cloud' && cloudSessionId && cloudSocket && cloudSocket.connected) {
+                    cloudDataReceived = true;
+                    if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+                    cloudSocket.emit('cloud-design', data);
+                    setCloudStatus('Synced', 'Live');
+                    setTimeout(() => {
+                        if (document.getElementById('lbl-cloud-status').innerText === 'Synced')
+                            setCloudStatus('Live');
+                    }, 1500);
+                }
+                $('footer-status').innerText = 'Syncing...';
+                setTimeout(() => { $('footer-status').innerText = 'Ready'; }, 1000);
+            }
+            if (type === 'full-export') {
+                if (desktopSocket && desktopSocket.connected) {
+                    desktopSocket.emit('full-export', data);
+                }
+            }
+        };
+    </script>
+</body>
+</html>
+

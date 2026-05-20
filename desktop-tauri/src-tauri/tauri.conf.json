@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicokaiser/tauri-apps/main/core/tauri-config-schema/schema.json",
+  "productName": "Seelo Desktop",
+  "version": "1.0.0",
+  "identifier": "com.seelo.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1430",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Seelo Desktop",
+        "width": 900,
+        "height": 600,
+        "minWidth": 700,
+        "minHeight": 400,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "icon": ["icons/icon.ico"]
+  }
+}

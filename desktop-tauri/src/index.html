@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #f0f0f0;
+      color: #111;
+      font-size: 13px;
+      overflow: hidden;
+      display: flex; height: 100vh;
+    }
+    .sidebar {
+      width: 220px; background: #e4e4e4; border-right: 1px solid #ccc;
+      display: flex; flex-direction: column; flex-shrink: 0;
+    }
+    .sidebar-head {
+      padding: 14px 16px; border-bottom: 1px solid #ccc;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .sidebar-head span { font-size: 14px; font-weight: 700; flex: 1; }
+    .sidebar-nav { padding: 8px; flex: 1; }
+    .nav-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-radius: 6px; cursor: pointer;
+      font-size: 12px; color: #333; margin-bottom: 2px;
+    }
+    .nav-item:hover { background: rgba(0,0,0,0.06); }
+    .nav-item.active { background: #111; color: #fff; }
+    .sidebar-status {
+      padding: 10px 16px; border-top: 1px solid #ccc;
+      font-size: 10px; color: #666;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .sidebar-status .row {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .sidebar-ip {
+      font-size: 9px; color: #999;
+    }
+    .sidebar-heartbeat {
+      font-size: 9px;
+      color: #888;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .dot.green { background: #22c55e; }
+    .dot.red { background: #ef4444; }
+    .dot.gray { background: #999; }
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .header {
+      padding: 12px 20px; border-bottom: 1px solid #ddd;
+      display: flex; align-items: center; gap: 12px; background: #fff;
+    }
+    .header h1 { font-size: 16px; font-weight: 600; flex: 1; }
+    .header .badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; font-weight: 600; }
+    .header .badge.free { background: #e5e5e5; color: #666; }
+    .header .badge.pro { background: #111; color: #fff; }
+    .content { flex: 1; overflow-y: auto; padding: 20px; }
+    .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { background: #fff; border-radius: 10px; border: 1px solid #ddd; padding: 16px; }
+    .card h3 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .card .stat { font-size: 28px; font-weight: 700; }
+    .card .stat-label { font-size: 11px; color: #666; margin-top: 2px; }
+    .card.full { grid-column: 1 / -1; }
+    .pairing-wrap { display: flex; gap: 14px; align-items: center; }
+    .pairing-qr {
+      width: 220px; height: 220px; background: #fff; border: 1px solid #e5e5e5;
+      border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    }
+    .pairing-meta { font-size: 11px; color: #666; display: flex; flex-direction: column; gap: 8px; }
+    .pairing-code { font-family: monospace; word-break: break-all; color: #333; }
+    .dev-list { display: flex; flex-direction: column; gap: 6px; }
+    .dev-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; background: #f8f8f8; border-radius: 6px;
+      border: 1px solid #e5e5e5;
+    }
+    .dev-item .info { flex: 1; }
+    .dev-item .name { font-size: 12px; font-weight: 500; }
+    .dev-item .meta { font-size: 10px; color: #888; }
+    .dev-item button { background: none; border: none; color: #999; cursor: pointer; font-size: 16px; }
+    .dev-item button:hover { color: #ef4444; }
+    .dev-empty { font-size: 11px; color: #999; text-align: center; padding: 20px; }
+    .tree-area { max-height: 300px; overflow-y: auto; font-size: 11px; font-family: monospace; }
+    .tree-item { padding: 2px 0; display: flex; align-items: center; gap: 6px; }
+    .tree-item .icon { color: #888; }
+    .tree-item .name { color: #333; }
+    .tree-item .dim { color: #999; font-size: 10px; }
+    .tree-page-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 4px;
+      border-radius: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .tree-page-head:hover { background: #f4f4f4; }
+    .tree-page-toggle {
+      width: 18px;
+      text-align: center;
+      color: #666;
+      font-weight: 700;
+    }
+    .tree-page-content { padding-left: 18px; }
+    .tree-frame-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .tree-frame-row:hover { background: #f5f5f5; }
+    .tree-layer-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 2px 6px 2px 24px;
+      color: #444;
+    }
+    .tree-loading-wrap { margin-bottom: 10px; }
+    .tree-loading-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #666; margin-bottom: 6px; }
+    .tree-progress { width: 100%; height: 8px; background: #ececec; border: 1px solid #ddd; border-radius: 999px; overflow: hidden; }
+    .tree-progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #111, #444); transition: width 0.25s ease; }
+    .hidden { display: none !important; }
+    .settings-area { display: flex; flex-direction: column; gap: 12px; }
+    .settings-area label { font-size: 11px; font-weight: 600; color: #444; }
+    .settings-area input { padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; outline: none; }
+    .settings-area input:focus { border-color: #111; }
+    .settings-area button { padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    .settings-area button:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <div class="sidebar-head">
+      <span>Seelo Desktop</span>
+    </div>
+    <div class="sidebar-nav">
+      <div class="nav-item active" data-page="dashboard">Dashboard</div>
+      <div class="nav-item" data-page="devices">Devices</div>
+      <div class="nav-item" data-page="project">Project Tree</div>
+      <div class="nav-item" data-page="settings">Settings</div>
+    </div>
+    <div class="sidebar-status">
+      <div class="row">
+        <span class="dot gray" id="plugin-dot"></span>
+        <span id="plugin-status">Plugin: Disconnected</span>
+      </div>
+      <div class="row sidebar-heartbeat">
+        <span id="plugin-heartbeat">Last heartbeat: --</span>
+      </div>
+      <div class="row sidebar-ip">
+        <span>Server: </span><span id="server-ip">--</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="header">
+      <h1 id="page-title">Dashboard</h1>
+
+    </div>
+
+    <div class="content">
+      <div id="page-dashboard" class="hidden">
+        <div class="dash-grid">
+          <div class="card">
+            <h3>Connected Devices</h3>
+            <div class="stat" id="device-count">0</div>
+            <div class="stat-label">active mobile devices</div>
+          </div>
+          <div class="card">
+            <h3>Plugin</h3>
+            <div class="stat" id="plugin-stat">—</div>
+            <div class="stat-label" id="plugin-stat-label">Not connected</div>
+          </div>
+          <div class="card full">
+            <h3>Connected Devices</h3>
+            <div class="dev-list" id="dashboard-devices">
+              <div class="dev-empty">No devices connected</div>
+            </div>
+          </div>
+          <div class="card full">
+            <h3>Pair Phone (Scan From Mobile App)</h3>
+            <div class="pairing-wrap">
+              <div class="pairing-qr" id="pairing-qr">
+                <div class="dev-empty">Generating QR...</div>
+              </div>
+              <div class="pairing-meta">
+                <div>Mobile app me <b>Scan</b> screen kholke is QR ko scan karo.</div>
+                <div>Local network par same Wi-Fi hona chahiye.</div>
+                <div class="pairing-code" id="pairing-payload"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-devices" class="hidden">
+        <div class="card full">
+          <h3>Managed Devices</h3>
+          <div class="dev-list" id="devices-list">
+            <div class="dev-empty">No devices connected</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-project" class="hidden">
+        <div class="card full">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+            <h3 style="margin:0;">Project Structure</h3>
+            <button id="export-btn" style="padding:8px 12px;background:#444;color:#fff;border:none;border-radius:6px;font-weight:600;cursor:pointer;">Request Full Export</button>
+          </div>
+          <p style="font-size:11px;color:#888;margin-bottom:10px;">Connect Figma plugin to see full project tree.</p>
+          <div class="tree-loading-wrap">
+            <div class="tree-loading-head">
+              <span id="tree-loading-status">Idle</span>
+              <span id="tree-loading-percent">0%</span>
+            </div>
+            <div class="tree-progress">
+              <div id="tree-progress-fill" class="tree-progress-fill"></div>
+            </div>
+          </div>
+          <div class="tree-area" id="project-tree">
+            <div style="color:#999;text-align:center;padding:20px;">Awaiting data from plugin...</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="page-settings" class="hidden">
+        <div class="card full settings-area">
+          <h3>Settings</h3>
+          <label>Server Address</label>
+          <input type="text" id="settings-server-addr" readonly>
+          <label>Room ID</label>
+          <input type="text" id="settings-room-id" value="seelo-desktop" readonly>
+          <button id="sync-btn">Trigger Plugin Sync</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  seelo-server:
+    build: .
+    container_name: seelo-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - CORS_ORIGIN=*
+      - PORT=3000
+      - DB_PATH=/data/seelo.db
+    volumes:
+      - seelo-data:/data
+
+volumes:
+  seelo-data:

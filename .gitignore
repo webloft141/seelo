@@ -1,0 +1,7 @@
+node_modules/
+.env
+target/
+build/
+.dart_tool/
+.pub-cache/
+*.log

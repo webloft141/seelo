@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default Seelo Desktop capability",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default"
+  ]
+}
