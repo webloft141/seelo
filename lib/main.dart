@@ -150,6 +150,13 @@ const builtInPresets = [
   DevicePreset(name: 'iPad Air 11"', screenWidth: 820, screenHeight: 1180, dpr: 2.0, exportScale: 2.0),
 ];
 
+class SessionEntry {
+  final String label;
+  final DateTime time;
+  final bool isCloud;
+  SessionEntry(this.label, this.time, {this.isCloud = false});
+}
+
 class SeeloConnectionController {
   io.Socket? _socket;
   String roomId = 'seelo-desktop';
@@ -169,6 +176,7 @@ class SeeloConnectionController {
   final ValueNotifier<List<SavedDevice>> savedDevices = ValueNotifier([]);
   final ValueNotifier<List<DesignIssue>> issues = ValueNotifier([]);
   final ValueNotifier<int> viewerCount = ValueNotifier(0);
+  final List<SessionEntry> sessionHistory = [];
 
   Timer? _designTimeout;
   Timer? _pingTimer;
@@ -240,6 +248,7 @@ class SeeloConnectionController {
       _reconnectCount = 0;
       connectionQuality.value = ConnectionQuality.good;
       viewerCount.value = 0;
+      sessionHistory.insert(0, SessionEntry('Cloud: ${sessionId.length > 8 ? sessionId.substring(0, 8) : sessionId}...', DateTime.now(), isCloud: true));
       socket.emit('join-session', {'sessionId': sessionId, 'role': 'viewer'});
       onConnected?.call();
       onStatus?.call('Cloud connected');
@@ -372,6 +381,7 @@ class SeeloConnectionController {
       _latencySamples = 0;
       connectionQuality.value = ConnectionQuality.good;
       _saveDevice(ip, port);
+      sessionHistory.insert(0, SessionEntry('Desktop: $ip:$port', DateTime.now()));
       joinAndRequestSync();
       _startPing();
       onConnected?.call();
@@ -1469,6 +1479,68 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     ).then((_) => _showingPopup = false);
   }
 
+  void _showHistory() {
+    final history = widget.controller.sessionHistory;
+    _showingPopup = true;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppPalette.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppPalette.dim, borderRadius: BorderRadius.circular(2))),
+              ),
+              const SizedBox(height: 16),
+              Text('Session History', style: const TextStyle(color: AppPalette.text, fontSize: 18, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text('${history.length} session${history.length != 1 ? 's' : ''}', style: const TextStyle(color: AppPalette.dim, fontSize: 13)),
+              const SizedBox(height: 16),
+              if (history.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(child: Text('No sessions yet', style: TextStyle(color: AppPalette.dim))),
+                )
+              else
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: history.length,
+                    separatorBuilder: (_, __) => const Divider(color: AppPalette.border, height: 1),
+                    itemBuilder: (_, i) {
+                      final entry = history[i];
+                      final icon = entry.isCloud ? Icons.cloud : Icons.desktop_windows;
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(icon, color: entry.isCloud ? const Color(0xFF22C55E) : AppPalette.dim, size: 20),
+                        title: Text(entry.label, style: const TextStyle(color: AppPalette.text, fontSize: 14)),
+                        subtitle: Text(_formatTime(entry.time), style: const TextStyle(color: AppPalette.dim, fontSize: 11)),
+                        contentPadding: EdgeInsets.zero,
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    ).then((_) => _showingPopup = false);
+  }
+
+  String _formatTime(DateTime t) {
+    final now = DateTime.now();
+    final diff = now.difference(t);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
   Widget _modeChip(String title, String subtitle, DisplayMode mode, DisplayMode current, void Function(void Function()) setInner) {
     final active = mode == current;
     return InkWell(
@@ -2101,6 +2173,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                     _transformationController.value = Matrix4.identity();
                                     _startToolbarTimer();
                                   }),
+                                  const SizedBox(width: 8),
+                                  _toolBtn(Icons.history, () { _showHistory(); _startToolbarTimer(); }),
                                   const SizedBox(width: 8),
                                   _toolBtn(Icons.settings, () { _showSettings(); _startToolbarTimer(); }),
                                 ],
