@@ -1307,6 +1307,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showIssues = true;
   bool _showSafeArea = false;
   bool _showGrid = false;
+  bool _showRulers = false;
   bool _showToolbar = true;
   bool _isLandscape = false;
   bool _wasInBackground = false;
@@ -1417,6 +1418,10 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                   const SizedBox(height: 8),
                   _settingToggle('Pixel Grid', '8×8 px alignment grid', _showGrid, (v) {
                     setState(() => _showGrid = v);
+                  }),
+                  const SizedBox(height: 8),
+                  _settingToggle('Rulers', 'Show measurement rulers', _showRulers, (v) {
+                    setState(() => _showRulers = v);
                   }),
                   const SizedBox(height: 16),
                   const Text('Display Mode', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
@@ -1841,6 +1846,14 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     );
   }
 
+  Widget _buildRulers(FrameMetadata meta, double renderW, double renderH) {
+    final scaleX = renderW / meta.frameWidth;
+    return CustomPaint(
+      size: Size(renderW, renderH),
+      painter: _RulerPainter(scale: scaleX, offsetX: 0, offsetY: 0),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1976,13 +1989,13 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showIssues) _buildIssueOverlay(meta, renderWidth, renderHeight),
                             if (_showSafeArea) _buildSafeAreaOverlay(meta, renderWidth, renderHeight),
                             if (_showGrid) _buildGridOverlay(meta, renderWidth, renderHeight),
+                            if (_showRulers) _buildRulers(meta, renderWidth, renderHeight),
                           ],
                         ),
                       ),
                     ),
                   );
                 } else {
-                  // Fit to screen mode
                   content = GestureDetector(
                     onTapUp: (details) {
                       if (meta.textLayers.isEmpty) return;
@@ -2018,6 +2031,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showIssues) _buildIssueOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_showSafeArea) _buildSafeAreaOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_showGrid) _buildGridOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (_showRulers) _buildRulers(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                           ],
                         ),
                       ),
@@ -2332,6 +2346,60 @@ class _GridPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _GridPainter old) =>
       old.cols != cols || old.rows != rows || old.cellW != cellW || old.cellH != cellH;
+}
+
+class _RulerPainter extends CustomPainter {
+  final double scale;
+  final double offsetX;
+  final double offsetY;
+
+  _RulerPainter({this.scale = 1.0, this.offsetX = 0.0, this.offsetY = 0.0});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const rulerSize = 24.0;
+    const tickInterval = 10.0;
+    const labelInterval = 50.0;
+
+    final bgPaint = Paint()..color = const Color(0xCC1C1C1E);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, rulerSize), bgPaint);
+    canvas.drawRect(Rect.fromLTWH(0, 0, rulerSize, size.height), bgPaint);
+
+    final tickPaint = Paint()..color = const Color(0xAAFFFFFF)..strokeWidth = 1.0;
+    final guidePaint = Paint()..color = const Color(0x18FFFFFF)..strokeWidth = 0.5;
+
+    final totalPx = ((size.width + offsetX) / scale).ceil();
+    for (double px = 0; px <= totalPx; px += tickInterval) {
+      final x = px * scale - offsetX;
+      if (x < 0 || x > size.width) continue;
+      final isMajor = px % labelInterval == 0;
+      canvas.drawLine(Offset(x, 0), Offset(x, isMajor ? 14.0 : 7.0), tickPaint);
+      if (isMajor && x + 25 < size.width) {
+        final tp = TextPainter(text: TextSpan(text: '${px.toInt()}', style: const TextStyle(color: Color(0xAAFFFFFF), fontSize: 9)), textDirection: TextDirection.ltr)
+          ..layout(maxWidth: 40);
+        tp.paint(canvas, Offset(x + 3, 14));
+        canvas.drawLine(Offset(x, rulerSize), Offset(x, size.height), guidePaint);
+      }
+    }
+
+    for (double py = 0; py <= ((size.height + offsetY) / scale).ceil(); py += tickInterval) {
+      final y = py * scale - offsetY;
+      if (y < 0 || y > size.height) continue;
+      final isMajor = py % labelInterval == 0;
+      canvas.drawLine(Offset(0, y), Offset(isMajor ? 14.0 : 7.0, y), tickPaint);
+      if (isMajor && y + 25 < size.height) {
+        final tp = TextPainter(text: TextSpan(text: '${py.toInt()}', style: const TextStyle(color: Color(0xAAFFFFFF), fontSize: 9)), textDirection: TextDirection.ltr)
+          ..layout(maxWidth: 40);
+        tp.paint(canvas, Offset(14, y + 3));
+        canvas.drawLine(Offset(rulerSize, y), Offset(size.width, y), guidePaint);
+      }
+    }
+
+    canvas.drawRect(const Rect.fromLTWH(0, 0, rulerSize, rulerSize), Paint()..color = const Color(0xFF1C1C1E));
+  }
+
+  @override
+  bool shouldRepaint(covariant _RulerPainter old) => old.scale != scale || old.offsetX != offsetX || old.offsetY != offsetY;
 }
 
 Widget _card({required Widget child}) {
