@@ -1392,11 +1392,13 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
         systemNavigationBarColor: Colors.transparent,
       ),
       child: MediaQuery(
-        data: MediaQuery.of(context).copyWith(
-          padding: EdgeInsets.zero,
-          viewPadding: EdgeInsets.zero,
-          viewInsets: EdgeInsets.zero,
-        ),
+        data: _showSystemUi
+            ? MediaQuery.of(context).copyWith(viewInsets: EdgeInsets.zero)
+            : MediaQuery.of(context).copyWith(
+                padding: EdgeInsets.zero,
+                viewPadding: EdgeInsets.zero,
+                viewInsets: EdgeInsets.zero,
+              ),
         child: Material(
           color: Colors.black,
           child: ValueListenableBuilder<int>(
