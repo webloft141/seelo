@@ -111,6 +111,14 @@ class FrameMetadata {
   double get imagePixelsHeight => frameHeight * exportScale;
 }
 
+class DesignIssue {
+  final String type;
+  final String message;
+  final double x, y, width, height;
+  final String? layerName;
+  DesignIssue({required this.type, required this.message, required this.x, required this.y, required this.width, required this.height, this.layerName});
+}
+
 class SeeloConnectionController {
   io.Socket? _socket;
   String roomId = 'seelo-desktop';
@@ -128,6 +136,7 @@ class SeeloConnectionController {
   final ValueNotifier<ConnectionQuality> connectionQuality = ValueNotifier(ConnectionQuality.disconnected);
   final ValueNotifier<int> latencyMs = ValueNotifier(0);
   final ValueNotifier<List<SavedDevice>> savedDevices = ValueNotifier([]);
+  final ValueNotifier<List<DesignIssue>> issues = ValueNotifier([]);
 
   Timer? _designTimeout;
   Timer? _pingTimer;
@@ -359,6 +368,7 @@ class SeeloConnectionController {
             );
             metadataNotifier.value = currentMetadata;
             imageVersion.value++;
+            _detectIssues();
           }
         }
       } catch (_) {}
@@ -404,6 +414,44 @@ class SeeloConnectionController {
         onStatus?.call('Waiting for design...');
       }
     });
+  }
+
+  void _detectIssues() {
+    final meta = currentMetadata;
+    final list = <DesignIssue>[];
+    if (meta == null) { issues.value = list; return; }
+    final fw = meta.frameWidth;
+    final fh = meta.frameHeight;
+    for (final layer in meta.textLayers) {
+      final lx = (layer['x'] as num?)?.toDouble() ?? 0;
+      final ly = (layer['y'] as num?)?.toDouble() ?? 0;
+      final lw = (layer['width'] as num?)?.toDouble() ?? 0;
+      final lh = (layer['height'] as num?)?.toDouble() ?? 0;
+      final name = layer['characters']?.toString() ?? '';
+      if (lw > fw && fw > 0) {
+        list.add(DesignIssue(type: 'overflow', message: 'Text wider than frame: "$name"', x: lx, y: ly, width: lw, height: lh, layerName: name));
+      }
+      if (lx + lw > fw && fw > 0) {
+        list.add(DesignIssue(type: 'overflow', message: 'Text extends past right edge', x: lx, y: ly, width: lw, height: lh, layerName: name));
+      }
+      if (ly + lh > fh && fh > 0) {
+        list.add(DesignIssue(type: 'overflow', message: 'Text extends past bottom edge', x: lx, y: ly, width: lw, height: lh, layerName: name));
+      }
+    }
+    for (int i = 0; i < meta.textLayers.length; i++) {
+      for (int j = i + 1; j < meta.textLayers.length; j++) {
+        final a = meta.textLayers[i]; final b = meta.textLayers[j];
+        final ax = (a['x'] as num?)?.toDouble() ?? 0; final ay = (a['y'] as num?)?.toDouble() ?? 0;
+        final aw = (a['width'] as num?)?.toDouble() ?? 0; final ah = (a['height'] as num?)?.toDouble() ?? 0;
+        final bx = (b['x'] as num?)?.toDouble() ?? 0; final by = (b['y'] as num?)?.toDouble() ?? 0;
+        final bw = (b['width'] as num?)?.toDouble() ?? 0; final bh = (b['height'] as num?)?.toDouble() ?? 0;
+        if (ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by) {
+          list.add(DesignIssue(type: 'overlap', message: 'Text layers overlap', x: ax, y: ay, width: aw, height: ah, layerName: a['characters']?.toString() ?? ''));
+          break;
+        }
+      }
+    }
+    issues.value = list;
   }
 
   void _startPing() {
@@ -1203,6 +1251,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   DateTime? _lastShake;
   bool _showingPopup = false;
   bool _showSystemUi = false;
+  bool _showIssues = true;
   bool _showToolbar = true;
   bool _wasInBackground = false;
   Timer? _toolbarTimer;
@@ -1473,6 +1522,37 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     return null;
   }
 
+  Widget _buildIssueOverlay(FrameMetadata meta, double renderW, double renderH) {
+    final issues = widget.controller.issues.value;
+    if (issues.isEmpty) return const SizedBox.shrink();
+    final scaleX = renderW / meta.frameWidth;
+    final scaleY = renderH / meta.frameHeight;
+    return ValueListenableBuilder<List<DesignIssue>>(
+      valueListenable: widget.controller.issues,
+      builder: (_, list, __) {
+        return Stack(
+          children: list.map((issue) {
+            final color = issue.type == 'overflow' ? const Color(0x44FF4757) : const Color(0x44FFA502);
+            final borderColor = issue.type == 'overflow' ? const Color(0xAAFF4757) : const Color(0xAAFFA502);
+            return Positioned(
+              left: issue.x * scaleX,
+              top: issue.y * scaleY,
+              width: issue.width * scaleX,
+              height: issue.height * scaleY,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color,
+                  border: Border.all(color: borderColor, width: 1.5),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1604,6 +1684,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                 child: const Text('Tap text to inspect', style: TextStyle(color: Colors.white38, fontSize: 10)),
                               ),
                             ),
+                            if (_showIssues) _buildIssueOverlay(meta, renderWidth, renderHeight),
                           ],
                         ),
                       ),
@@ -1643,6 +1724,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               filterQuality: FilterQuality.high,
                               gaplessPlayback: true,
                             ),
+                            if (_showIssues) _buildIssueOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                           ],
                         ),
                       ),
@@ -1684,6 +1766,36 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                           decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(6)),
                           child: Text('${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
                         ),
+                      ),
+                    ),
+                  // Issue badge
+                  if (imageData != null && meta != null)
+                    Positioned(
+                      bottom: 12,
+                      left: 12,
+                      child: ValueListenableBuilder<List<DesignIssue>>(
+                        valueListenable: widget.controller.issues,
+                        builder: (_, issues, __) {
+                          if (issues.isEmpty) return const SizedBox.shrink();
+                          return GestureDetector(
+                            onTap: () => setState(() => _showIssues = !_showIssues),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: issues.any((i) => i.type == 'overflow') ? const Color(0xCCFF4757) : const Color(0xCCFFA502),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.white),
+                                  const SizedBox(width: 6),
+                                  Text('${issues.length}', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ),
                   // Connection quality indicator (top right)
