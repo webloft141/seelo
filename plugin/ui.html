@@ -387,7 +387,8 @@
         let cloudSocket = null;
         let cloudSyncTimer = null;
         let cloudDataReceived = false;
-        let relayUrl = 'http://localhost:3001'; // Change to deployed Railway URL when ready
+        let cloudPendingSync = false;
+        let relayUrl = 'https://seelo-relay.onrender.com';
 
         function startCloudSession() {
             cloudSessionId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
@@ -403,10 +404,12 @@
             setTimeout(fitHeight, 50);
         }
 
+        let cloudHeartbeat = null;
+
         function connectCloudRelay() {
             if (cloudSocket) { try { cloudSocket.disconnect(); } catch(e) {} }
             try {
-                cloudSocket = io(relayUrl, { transports: ['websocket', 'polling'], timeout: 8000 });
+                cloudSocket = io(relayUrl, { transports: ['websocket', 'polling'], timeout: 15000 });
             } catch(e) {
                 setCloudStatus('Relay error');
                 return;
@@ -418,11 +421,24 @@
                 cloudSyncTimer = setTimeout(() => {
                     if (!cloudDataReceived) setCloudStatus('Select any frame in Figma to start', '');
                 }, 5000);
-                parent.postMessage({ pluginMessage: { type: 'manual-sync' } }, '*');
+                if (cloudPendingSync) {
+                    cloudPendingSync = false;
+                    parent.postMessage({ pluginMessage: { type: 'manual-sync' } }, '*');
+                } else {
+                    parent.postMessage({ pluginMessage: { type: 'manual-sync' } }, '*');
+                }
+                // Keep Render awake with heartbeat every 30s
+                if (cloudHeartbeat) clearInterval(cloudHeartbeat);
+                cloudHeartbeat = setInterval(() => {
+                    if (cloudSocket && cloudSocket.connected) {
+                        cloudSocket.emit('ping', { ts: Date.now() });
+                    }
+                }, 30000);
             });
             cloudSocket.on('disconnect', () => {
                 setCloudStatus('Disconnected');
                 cloudDataReceived = false;
+                // Auto-retry sync on reconnect
             });
             cloudSocket.on('connect_error', () => {
                 setCloudStatus('Relay offline');
@@ -489,15 +505,21 @@
                 if (desktopSocket && desktopSocket.connected) {
                     desktopSocket.emit('design-update', data);
                 }
-                if (currentMode === 'cloud' && cloudSessionId && cloudSocket && cloudSocket.connected) {
-                    cloudDataReceived = true;
-                    if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
-                    cloudSocket.emit('cloud-design', data);
-                    setCloudStatus('Synced', 'Live');
-                    setTimeout(() => {
-                        if (document.getElementById('lbl-cloud-status').innerText === 'Synced')
-                            setCloudStatus('Live');
-                    }, 1500);
+                if (currentMode === 'cloud' && cloudSessionId && cloudSocket) {
+                    if (cloudSocket.connected) {
+                        cloudDataReceived = true;
+                        cloudPendingSync = false;
+                        if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+                        cloudSocket.emit('cloud-design', data);
+                        setCloudStatus('Synced', 'Live');
+                        setTimeout(() => {
+                            if (document.getElementById('lbl-cloud-status').innerText === 'Synced')
+                                setCloudStatus('Live');
+                        }, 1500);
+                    } else {
+                        cloudPendingSync = true;
+                        // Will auto-sync on reconnect
+                    }
                 }
                 $('footer-status').innerText = 'Syncing...';
                 setTimeout(() => { $('footer-status').innerText = 'Ready'; }, 1000);
