@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -1310,6 +1314,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   DevicePreset _selectedPreset = builtInPresets[0];
   final TransformationController _transformationController = TransformationController();
   final GlobalKey _imageKey = GlobalKey();
+  final GlobalKey _screenshotKey = GlobalKey();
 
   @override
   void initState() {
@@ -1593,6 +1598,27 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+
+  Future<void> _takeScreenshot() async {
+    try {
+      final boundary = _screenshotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return;
+      final image = await boundary.toImage(pixelRatio: MediaQuery.of(context).devicePixelRatio);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+      final bytes = byteData.buffer.asUint8List();
+      final dir = Directory.systemTemp;
+      final file = File('${dir.path}/seelo_${DateTime.now().millisecondsSinceEpoch}.png');
+      await file.writeAsBytes(bytes);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Screenshot saved'),
+          action: SnackBarAction(label: 'OK', onPressed: () {}),
+          duration: const Duration(seconds: 3),
+        ));
+      }
+    } catch (_) {}
   }
 
   Widget _modeChip(String title, String subtitle, DisplayMode mode, DisplayMode current, void Function(void Function()) setInner) {
@@ -2014,9 +2040,12 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         widget.controller.requestNavigate('next');
                       }
                     },
-                    child: Container(
-                      color: Colors.black,
-                      child: _showSystemUi ? SafeArea(child: content) : content,
+                    child: RepaintBoundary(
+                      key: _screenshotKey,
+                      child: Container(
+                        color: Colors.black,
+                        child: _showSystemUi ? SafeArea(child: content) : content,
+                      ),
                     ),
                   ),
                   // Top-left badges: frame info + viewer count
@@ -2227,6 +2256,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                     _transformationController.value = Matrix4.identity();
                                     _startToolbarTimer();
                                   }),
+                                  const SizedBox(width: 8),
+                                  _toolBtn(Icons.download_rounded, () { _takeScreenshot(); _startToolbarTimer(); }),
                                   const SizedBox(width: 8),
                                   _toolBtn(Icons.history, () { _showHistory(); _startToolbarTimer(); }),
                                   const SizedBox(width: 8),
