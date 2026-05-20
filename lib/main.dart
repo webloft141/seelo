@@ -119,6 +119,37 @@ class DesignIssue {
   DesignIssue({required this.type, required this.message, required this.x, required this.y, required this.width, required this.height, this.layerName});
 }
 
+class DevicePreset {
+  final String name;
+  final double screenWidth;
+  final double screenHeight;
+  final double dpr;
+  final double exportScale;
+
+  const DevicePreset({
+    required this.name,
+    required this.screenWidth,
+    required this.screenHeight,
+    this.dpr = 3.0,
+    this.exportScale = 3.0,
+  });
+
+  String get label => '$name (${screenWidth.toInt()}\u00D7${screenHeight.toInt()})';
+}
+
+const builtInPresets = [
+  DevicePreset(name: 'iPhone 15 Pro Max', screenWidth: 430, screenHeight: 932, dpr: 3.0, exportScale: 3.0),
+  DevicePreset(name: 'iPhone 15 Pro', screenWidth: 393, screenHeight: 852, dpr: 3.0, exportScale: 3.0),
+  DevicePreset(name: 'iPhone 15', screenWidth: 393, screenHeight: 852, dpr: 2.94, exportScale: 3.0),
+  DevicePreset(name: 'iPhone SE', screenWidth: 375, screenHeight: 667, dpr: 2.0, exportScale: 2.0),
+  DevicePreset(name: 'Pixel 8 Pro', screenWidth: 412, screenHeight: 915, dpr: 3.5, exportScale: 3.0),
+  DevicePreset(name: 'Pixel 8', screenWidth: 392, screenHeight: 852, dpr: 2.63, exportScale: 3.0),
+  DevicePreset(name: 'Galaxy S24', screenWidth: 412, screenHeight: 915, dpr: 3.0, exportScale: 3.0),
+  DevicePreset(name: 'Galaxy S24 Ultra', screenWidth: 412, screenHeight: 915, dpr: 3.69, exportScale: 3.0),
+  DevicePreset(name: 'iPad Pro 12.9"', screenWidth: 1024, screenHeight: 1366, dpr: 2.0, exportScale: 2.0),
+  DevicePreset(name: 'iPad Air 11"', screenWidth: 820, screenHeight: 1180, dpr: 2.0, exportScale: 2.0),
+];
+
 class SeeloConnectionController {
   io.Socket? _socket;
   String roomId = 'seelo-desktop';
@@ -1265,6 +1296,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _wasInBackground = false;
   Timer? _toolbarTimer;
   DisplayMode _displayMode = DisplayMode.fitToScreen;
+  DevicePreset _selectedPreset = builtInPresets[0];
   final TransformationController _transformationController = TransformationController();
   final GlobalKey _imageKey = GlobalKey();
 
@@ -1375,6 +1407,42 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                   _modeChip('Fit to Screen', 'Stretch image to fill screen width', DisplayMode.fitToScreen, localMode, setInner),
                   const SizedBox(height: 6),
                   _modeChip('Pixel Perfect', '1:1 native resolution, no stretching', DisplayMode.pixelPerfect, localMode, setInner),
+                  const SizedBox(height: 16),
+                  const Text('Device Preset', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 160),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: List.generate(builtInPresets.length, (i) {
+                          final preset = builtInPresets[i];
+                          final active = _selectedPreset.name == preset.name;
+                          return InkWell(
+                            onTap: () => setState(() => _selectedPreset = preset),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              margin: const EdgeInsets.only(bottom: 4),
+                              decoration: BoxDecoration(
+                                color: active ? Colors.white.withOpacity(0.1) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                border: active ? Border.all(color: Colors.white24) : null,
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(active ? Icons.check_circle : Icons.phone_android, size: 16,
+                                      color: active ? const Color(0xFF22C55E) : AppPalette.dim),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(preset.label, style: TextStyle(color: active ? Colors.white : AppPalette.dim, fontSize: 13)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ),
                 ],
               );
             },
@@ -1838,7 +1906,14 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(6)),
-                              child: Text('${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                  const SizedBox(width: 6),
+                                  Text(_selectedPreset.name, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                                ],
+                              ),
                             ),
                           ),
                           if (widget.controller.serverLabel == 'Cloud')
