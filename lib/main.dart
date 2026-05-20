@@ -8,7 +8,10 @@ import 'package:flutter/rendering.dart';
 
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart' show User;
 import 'package:sensors_plus/sensors_plus.dart';
+import 'auth_screen.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter/services.dart';
 
@@ -38,7 +41,13 @@ class SavedDevice {
   };
 }
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {
+    // Firebase not configured — auth disabled
+  }
   runApp(const SeeloApp());
 }
 
@@ -56,24 +65,48 @@ class SeeloConfig {
   SeeloConfig._();
 }
 
-class SeeloApp extends StatelessWidget {
+class SeeloApp extends StatefulWidget {
   const SeeloApp({super.key});
+
+  @override
+  State<SeeloApp> createState() => _SeeloAppState();
+}
+
+class _SeeloAppState extends State<SeeloApp> {
+  bool _firebaseReady = false;
+  User? _user;
+  StreamSubscription? _authSub;
+
+  @override
+  void initState() {
+    super.initState();
+    try {
+      _authSub = AuthService().authState.listen((u) => setState(() => _user = u));
+      _firebaseReady = true;
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Seelo',
       debugShowCheckedModeBanner: false,
+      home: _firebaseReady ? (_user != null ? const SplashScreen() : const AuthScreen()) : const SplashScreen(),
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFF0C0C0C),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0C0C0C),
+          backgroundColor: const Color(0xFF0C0C0C),
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           foregroundColor: Colors.white,
         ),
       ),
-      home: const SplashScreen(),
     );
   }
 }
@@ -812,6 +845,14 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.white70),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white38, size: 20),
+            onPressed: () async {
+              try {
+                await AuthService().signOut();
+              } catch (_) {}
+            },
           ),
         ],
       ),
