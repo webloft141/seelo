@@ -174,6 +174,8 @@ class SeeloConnectionController {
 
   String? currentImageData;
   FrameMetadata? currentMetadata;
+  String? previousImageData;
+  FrameMetadata? previousMetadata;
   String? _lastFrameId;
 
   final ValueNotifier<int> imageVersion = ValueNotifier<int>(0);
@@ -270,6 +272,8 @@ class SeeloConnectionController {
           final imageData = design['imageData'];
           final newId = design['id']?.toString();
           if (imageData is String && imageData.startsWith('data:image')) {
+            previousImageData = currentImageData;
+            previousMetadata = currentMetadata;
             _lastFrameId = newId;
             currentImageData = imageData;
             currentMetadata = FrameMetadata(
@@ -409,6 +413,8 @@ class SeeloConnectionController {
             return;
           }
           if (imageData is String && imageData.startsWith('data:image')) {
+            previousImageData = currentImageData;
+            previousMetadata = currentMetadata;
             _lastFrameId = newId;
             currentImageData = imageData;
             currentMetadata = FrameMetadata(
@@ -1328,6 +1334,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showGrid = false;
   bool _showRulers = false;
   bool _showDeviceFrame = false;
+  bool _overlayMode = false;
+  double _overlayOpacity = 0.5;
   bool _showToolbar = true;
   bool _isLandscape = false;
   bool _measureMode = false;
@@ -2140,6 +2148,18 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         color: const Color(0xFF0C0C0C),
                         child: Stack(
                           children: [
+                            if (_overlayMode && widget.controller.previousImageData != null)
+                              Opacity(
+                                opacity: _overlayOpacity,
+                                child: Image.memory(
+                                  base64Decode(widget.controller.previousImageData!.split(',').last),
+                                  width: renderWidth,
+                                  height: renderHeight,
+                                  fit: BoxFit.fill,
+                                  filterQuality: FilterQuality.high,
+                                  gaplessPlayback: true,
+                                ),
+                              ),
                             Image.memory(
                               key: _imageKey,
                               decodedImage,
@@ -2227,6 +2247,17 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         physics: const ClampingScrollPhysics(),
                         child: Stack(
                           children: [
+                            if (_overlayMode && widget.controller.previousImageData != null)
+                              Opacity(
+                                opacity: _overlayOpacity,
+                                child: Image.memory(
+                                  base64Decode(widget.controller.previousImageData!.split(',').last),
+                                  width: screenWidth,
+                                  fit: BoxFit.fitWidth,
+                                  filterQuality: FilterQuality.high,
+                                  gaplessPlayback: true,
+                                ),
+                              ),
                             Image.memory(
                               key: _imageKey,
                               decodedImage,
@@ -2522,6 +2553,11 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                   const SizedBox(width: 8),
                                   _toolBtn(_measureMode ? Icons.horizontal_rule : Icons.straighten, () {
                                     setState(() { _measureMode = !_measureMode; _measurePoints.clear(); });
+                                    _startToolbarTimer();
+                                  }),
+                                  const SizedBox(width: 8),
+                                  _toolBtn(_overlayMode ? Icons.layers_clear : Icons.layers, () {
+                                    setState(() => _overlayMode = !_overlayMode);
                                     _startToolbarTimer();
                                   }),
                                   const SizedBox(width: 8),
