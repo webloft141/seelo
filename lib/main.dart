@@ -153,6 +153,8 @@ const builtInPresets = [
   DevicePreset(name: 'Galaxy S24 Ultra', screenWidth: 412, screenHeight: 915, dpr: 3.69, exportScale: 3.0),
   DevicePreset(name: 'iPad Pro 12.9"', screenWidth: 1024, screenHeight: 1366, dpr: 2.0, exportScale: 2.0),
   DevicePreset(name: 'iPad Air 11"', screenWidth: 820, screenHeight: 1180, dpr: 2.0, exportScale: 2.0),
+  DevicePreset(name: 'Desktop HD', screenWidth: 1440, screenHeight: 900, dpr: 1.0, exportScale: 1.0),
+  DevicePreset(name: 'Desktop FHD', screenWidth: 1920, screenHeight: 1080, dpr: 1.0, exportScale: 1.0),
 ];
 
 class SessionEntry {
@@ -1325,6 +1327,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showSafeArea = false;
   bool _showGrid = false;
   bool _showRulers = false;
+  bool _showDeviceFrame = false;
   bool _showToolbar = true;
   bool _isLandscape = false;
   bool _measureMode = false;
@@ -1441,6 +1444,10 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                   const SizedBox(height: 8),
                   _settingToggle('Rulers', 'Show measurement rulers', _showRulers, (v) {
                     setState(() => _showRulers = v);
+                  }),
+                  const SizedBox(height: 8),
+                  _settingToggle('Device Frame', 'Show bezel + notch overlay', _showDeviceFrame, (v) {
+                    setState(() => _showDeviceFrame = v);
                   }),
                   const SizedBox(height: 16),
                   const Text('Display Mode', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
@@ -1940,6 +1947,42 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     );
   }
 
+  Widget _buildDeviceFrame(FrameMetadata meta, double renderW, double renderH) {
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          // Rounded corners (dark bars at corners)
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0x88FFFFFF), width: 2),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+            ),
+          ),
+          // Notch indicator at top center
+          Positioned(
+            top: 0, left: renderW / 2 - 40, width: 80, height: 6,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xCC1C1C1E),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(3)),
+              ),
+            ),
+          ),
+          // Bottom home indicator (small pill)
+          Positioned(
+            bottom: 4, left: renderW / 2 - 25, width: 50, height: 4,
+            child: Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.3), borderRadius: BorderRadius.circular(2))),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMeasurementOverlay(FrameMetadata meta, double renderW, double renderH) {
     if (_measurePoints.length < 2) {
       if (_measurePoints.length == 1) {
@@ -2140,6 +2183,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showGrid) _buildGridOverlay(meta, renderWidth, renderHeight),
                             if (_showRulers) _buildRulers(meta, renderWidth, renderHeight),
                             if (_measureMode) _buildMeasurementOverlay(meta, renderWidth, renderHeight),
+                            if (_showDeviceFrame) _buildDeviceFrame(meta, renderWidth, renderHeight),
                           ],
                         ),
                       ),
@@ -2196,6 +2240,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showGrid) _buildGridOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_showRulers) _buildRulers(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_measureMode) _buildMeasurementOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (_showDeviceFrame) _buildDeviceFrame(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                           ],
                         ),
                       ),
