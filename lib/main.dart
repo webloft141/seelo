@@ -177,6 +177,7 @@ class SeeloConnectionController {
   final ValueNotifier<List<DesignIssue>> issues = ValueNotifier([]);
   final ValueNotifier<int> viewerCount = ValueNotifier(0);
   final List<SessionEntry> sessionHistory = [];
+  final List<DevicePreset> customPresets = [];
 
   Timer? _designTimeout;
   Timer? _pingTimer;
@@ -1421,38 +1422,91 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                   const Text('Device Preset', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   Container(
-                    constraints: const BoxConstraints(maxHeight: 160),
+                    constraints: const BoxConstraints(maxHeight: 180),
                     child: SingleChildScrollView(
                       child: Column(
-                        children: List.generate(builtInPresets.length, (i) {
-                          final preset = builtInPresets[i];
-                          final active = _selectedPreset.name == preset.name;
-                          return InkWell(
-                            onTap: () => setState(() => _selectedPreset = preset),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              margin: const EdgeInsets.only(bottom: 4),
-                              decoration: BoxDecoration(
-                                color: active ? Colors.white.withOpacity(0.1) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(8),
-                                border: active ? Border.all(color: Colors.white24) : null,
+                        children: [
+                          // Custom presets
+                          ...widget.controller.customPresets.map((preset) {
+                            final active = _selectedPreset.name == preset.name;
+                            return InkWell(
+                              onTap: () => setState(() => _selectedPreset = preset),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                margin: const EdgeInsets.only(bottom: 4),
+                                decoration: BoxDecoration(
+                                  color: active ? const Color(0x3322C55E) : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: active ? Border.all(color: const Color(0x5522C55E)) : null,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.star, size: 16, color: active ? const Color(0xFF22C55E) : const Color(0xAA22C55E)),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: Text(preset.label, style: TextStyle(color: active ? Colors.white : const Color(0xCC22C55E), fontSize: 13))),
+                                    GestureDetector(
+                                      onTap: () => setState(() => widget.controller.customPresets.remove(preset)),
+                                      child: const Icon(Icons.close, size: 14, color: AppPalette.dim),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(active ? Icons.check_circle : Icons.phone_android, size: 16,
-                                      color: active ? const Color(0xFF22C55E) : AppPalette.dim),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(preset.label, style: TextStyle(color: active ? Colors.white : AppPalette.dim, fontSize: 13)),
-                                  ),
-                                ],
-                              ),
+                            );
+                          }),
+                          if (widget.controller.customPresets.isNotEmpty)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 4),
+                              child: Divider(color: AppPalette.border, height: 1),
                             ),
-                          );
-                        }),
+                          // Built-in presets
+                          ...builtInPresets.map((preset) {
+                            final active = _selectedPreset.name == preset.name;
+                            return InkWell(
+                              onTap: () => setState(() => _selectedPreset = preset),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                margin: const EdgeInsets.only(bottom: 4),
+                                decoration: BoxDecoration(
+                                  color: active ? Colors.white.withOpacity(0.1) : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: active ? Border.all(color: Colors.white24) : null,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(active ? Icons.check_circle : Icons.phone_android, size: 16,
+                                        color: active ? const Color(0xFF22C55E) : AppPalette.dim),
+                                    const SizedBox(width: 10),
+                                    Expanded(child: Text(preset.label, style: TextStyle(color: active ? Colors.white : AppPalette.dim, fontSize: 13))),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
                       ),
                     ),
                   ),
+                  Builder(builder: (_) {
+                    final m = widget.controller.currentMetadata;
+                    if (m == null) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: TextButton.icon(
+                          onPressed: () {
+                            final p = DevicePreset(name: '${m.frameWidth.toInt()}x${m.frameHeight.toInt()}', screenWidth: m.frameWidth, screenHeight: m.frameHeight);
+                            if (widget.controller.customPresets.any((x) => x.name == p.name)) return;
+                            widget.controller.customPresets.insert(0, p);
+                            setState(() => _selectedPreset = p);
+                          },
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Save Current as Preset', style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(foregroundColor: AppPalette.dim, padding: const EdgeInsets.symmetric(vertical: 8)),
+                        ),
+                      ),
+                    );
+                  }),
                 ],
               );
             },
