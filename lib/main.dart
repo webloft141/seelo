@@ -137,6 +137,7 @@ class SeeloConnectionController {
   final ValueNotifier<int> latencyMs = ValueNotifier(0);
   final ValueNotifier<List<SavedDevice>> savedDevices = ValueNotifier([]);
   final ValueNotifier<List<DesignIssue>> issues = ValueNotifier([]);
+  final ValueNotifier<int> viewerCount = ValueNotifier(0);
 
   Timer? _designTimeout;
   Timer? _pingTimer;
@@ -207,6 +208,7 @@ class SeeloConnectionController {
       connecting = false;
       _reconnectCount = 0;
       connectionQuality.value = ConnectionQuality.good;
+      viewerCount.value = 0;
       socket.emit('join-session', {'sessionId': sessionId, 'role': 'viewer'});
       onConnected?.call();
       onStatus?.call('Cloud connected');
@@ -240,6 +242,11 @@ class SeeloConnectionController {
       } catch (_) {}
       _designTimeout?.cancel();
       onStatus?.call('Preview synced');
+    });
+
+    socket.on('viewer-count', (count) {
+      if (_disposed) return;
+      viewerCount.value = (count is num) ? count.toInt() : 0;
     });
 
     socket.onConnectError((err) {
@@ -1818,18 +1825,45 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                       child: _showSystemUi ? SafeArea(child: content) : content,
                     ),
                   ),
-                  // Frame info overlay
+                  // Top-left badges: frame info + viewer count
                   if (imageData != null && meta != null)
                     Positioned(
                       top: 8,
                       left: 8,
-                      child: GestureDetector(
-                        onTap: _toggleToolbar,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(6)),
-                          child: Text('${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          GestureDetector(
+                            onTap: _toggleToolbar,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(6)),
+                              child: Text('${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                            ),
+                          ),
+                          if (widget.controller.serverLabel == 'Cloud')
+                            ValueListenableBuilder<int>(
+                              valueListenable: widget.controller.viewerCount,
+                              builder: (_, count, __) {
+                                if (count <= 0) return const SizedBox.shrink();
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(color: const Color(0x9922C55E), borderRadius: BorderRadius.circular(6)),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.people_alt_rounded, size: 12, color: Colors.white),
+                                        const SizedBox(width: 4),
+                                        Text('$count', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
                       ),
                     ),
                   // Issue badge
@@ -1963,6 +1997,26 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                       );
                                     },
                                   ),
+                                  if (widget.controller.serverLabel == 'Cloud')
+                                    ValueListenableBuilder<int>(
+                                      valueListenable: widget.controller.viewerCount,
+                                      builder: (_, count, __) {
+                                        final label = count > 1 ? '$count viewers' : count == 1 ? '1 viewer' : '';
+                                        if (label.isEmpty) return const SizedBox.shrink();
+                                        return Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0x3322C55E),
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(color: const Color(0x5522C55E)),
+                                            ),
+                                            child: Text(label, style: const TextStyle(color: Color(0xCC22C55E), fontSize: 10, fontWeight: FontWeight.w600)),
+                                          ),
+                                        );
+                                      },
+                                    ),
                                   _toolBtn(Icons.close, () => Navigator.of(context).pop()),
                                   const SizedBox(width: 8),
                                   _toolBtn(Icons.refresh, () { widget.controller.requestManualSync(); _startToolbarTimer(); }),
