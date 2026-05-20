@@ -1308,6 +1308,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showSafeArea = false;
   bool _showGrid = false;
   bool _showToolbar = true;
+  bool _isLandscape = false;
   bool _wasInBackground = false;
   Timer? _toolbarTimer;
   DisplayMode _displayMode = DisplayMode.fitToScreen;
@@ -1856,7 +1857,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final size = MediaQuery.of(context).size;
+    final screenWidth = _isLandscape ? size.height : size.width;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
@@ -2067,6 +2069,14 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                   Text('${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
                                   const SizedBox(width: 6),
                                   Text(_selectedPreset.name, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                                  if (_isLandscape) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                      decoration: BoxDecoration(color: const Color(0x33FFA502), borderRadius: BorderRadius.circular(3), border: Border.all(color: const Color(0x55FFA502))),
+                                      child: const Text('LAND', style: TextStyle(color: Color(0xCCFFA502), fontSize: 8, fontWeight: FontWeight.w700)),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -2254,6 +2264,11 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                   _toolBtn(_displayMode == DisplayMode.pixelPerfect ? Icons.fit_screen : Icons.one_x_mobiledata, () {
                                     setState(() => _displayMode = _displayMode == DisplayMode.fitToScreen ? DisplayMode.pixelPerfect : DisplayMode.fitToScreen);
                                     _transformationController.value = Matrix4.identity();
+                                    _startToolbarTimer();
+                                  }),
+                                  const SizedBox(width: 8),
+                                  _toolBtn(_isLandscape ? Icons.screen_rotation : Icons.rotate_left, () {
+                                    setState(() => _isLandscape = !_isLandscape);
                                     _startToolbarTimer();
                                   }),
                                   const SizedBox(width: 8),
