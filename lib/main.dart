@@ -118,9 +118,10 @@ class FrameMetadata {
 class DesignIssue {
   final String type;
   final String message;
+  final String suggestion;
   final double x, y, width, height;
   final String? layerName;
-  DesignIssue({required this.type, required this.message, required this.x, required this.y, required this.width, required this.height, this.layerName});
+  DesignIssue({required this.type, required this.message, this.suggestion = '', required this.x, required this.y, required this.width, required this.height, this.layerName});
 }
 
 class DevicePreset {
@@ -482,13 +483,13 @@ class SeeloConnectionController {
       final lh = (layer['height'] as num?)?.toDouble() ?? 0;
       final name = layer['characters']?.toString() ?? '';
       if (lw > fw && fw > 0) {
-        list.add(DesignIssue(type: 'overflow', message: 'Text wider than frame: "$name"', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(DesignIssue(type: 'overflow', message: 'Text wider than frame: "$name"', suggestion: 'Reduce font size or wrap text to fit within $fw\xD7$fh frame', x: lx, y: ly, width: lw, height: lh, layerName: name));
       }
       if (lx + lw > fw && fw > 0) {
-        list.add(DesignIssue(type: 'overflow', message: 'Text extends past right edge', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(DesignIssue(type: 'overflow', message: 'Text extends past right edge', suggestion: 'Move text layer left or reduce width to fit within frame boundary', x: lx, y: ly, width: lw, height: lh, layerName: name));
       }
       if (ly + lh > fh && fh > 0) {
-        list.add(DesignIssue(type: 'overflow', message: 'Text extends past bottom edge', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(DesignIssue(type: 'overflow', message: 'Text extends past bottom edge', suggestion: 'Move text layer up or reduce height to stay within frame', x: lx, y: ly, width: lw, height: lh, layerName: name));
       }
     }
     for (int i = 0; i < meta.textLayers.length; i++) {
@@ -499,9 +500,25 @@ class SeeloConnectionController {
         final bx = (b['x'] as num?)?.toDouble() ?? 0; final by = (b['y'] as num?)?.toDouble() ?? 0;
         final bw = (b['width'] as num?)?.toDouble() ?? 0; final bh = (b['height'] as num?)?.toDouble() ?? 0;
         if (ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by) {
-          list.add(DesignIssue(type: 'overlap', message: 'Text layers overlap', x: ax, y: ay, width: aw, height: ah, layerName: a['characters']?.toString() ?? ''));
+          list.add(DesignIssue(type: 'overlap', message: 'Text layers overlap', suggestion: 'Reposition layers to avoid overlap, or use auto-layout', x: ax, y: ay, width: aw, height: ah, layerName: a['characters']?.toString() ?? ''));
           break;
         }
+      }
+    }
+    // Unsafe spacing check — check if text is too close to safe zone
+    for (final layer in meta.textLayers) {
+      final lx = (layer['x'] as num?)?.toDouble() ?? 0;
+      final ly = (layer['y'] as num?)?.toDouble() ?? 0;
+      final lw = (layer['width'] as num?)?.toDouble() ?? 0;
+      final lh = (layer['height'] as num?)?.toDouble() ?? 0;
+      final name = layer['characters']?.toString() ?? '';
+      final unsafeTop = fh * 0.08;
+      final unsafeBottom = fh * 0.92;
+      if (ly < unsafeTop && ly + lh > 0) {
+        list.add(DesignIssue(type: 'spacing', message: 'Text in top unsafe area', suggestion: 'Move text below ${unsafeTop.toInt()}px to avoid notch overlap', x: lx, y: ly, width: lw, height: lh, layerName: name));
+      }
+      if (ly + lh > unsafeBottom) {
+        list.add(DesignIssue(type: 'spacing', message: 'Text in bottom unsafe area', suggestion: 'Move text above ${unsafeBottom.toInt()}px to avoid home indicator', x: lx, y: ly, width: lw, height: lh, layerName: name));
       }
     }
     issues.value = list;
@@ -1599,6 +1616,73 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     ).then((_) => _showingPopup = false);
   }
 
+  void _showSuggestions(List<DesignIssue> issues) {
+    _showingPopup = true;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppPalette.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppPalette.dim, borderRadius: BorderRadius.circular(2))),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF22C55E)),
+                  const SizedBox(width: 8),
+                  Text('Smart Suggestions', style: const TextStyle(color: AppPalette.text, fontSize: 18, fontWeight: FontWeight.w700)),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text('${issues.length} issue${issues.length != 1 ? 's' : ''} found', style: const TextStyle(color: AppPalette.dim, fontSize: 13)),
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: issues.length,
+                  separatorBuilder: (_, __) => const Divider(color: AppPalette.border, height: 1),
+                  itemBuilder: (_, i) {
+                    final issue = issues[i];
+                    final icon = issue.type == 'overflow' ? Icons.arrow_outward : issue.type == 'spacing' ? Icons.space_bar : Icons.layers;
+                    final color = issue.type == 'overflow' ? const Color(0xFFFF4757) : issue.type == 'spacing' ? const Color(0xFFFFA502) : const Color(0xFF22C55E);
+                    return SizedBox(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(icon, size: 16, color: color),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(issue.message, style: const TextStyle(color: AppPalette.text, fontSize: 13, fontWeight: FontWeight.w600)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 24),
+                            child: Text(issue.suggestion, style: const TextStyle(color: AppPalette.dim, fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ).then((_) => _showingPopup = false);
+  }
+
   String _formatTime(DateTime t) {
     final now = DateTime.now();
     final diff = now.difference(t);
@@ -2200,7 +2284,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         ],
                       ),
                     ),
-                  // Issue badge
+                  // Issue badge + suggestions
                   if (imageData != null && meta != null)
                     Positioned(
                       bottom: 12,
@@ -2209,23 +2293,48 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         valueListenable: widget.controller.issues,
                         builder: (_, issues, __) {
                           if (issues.isEmpty) return const SizedBox.shrink();
-                          return GestureDetector(
-                            onTap: () => setState(() => _showIssues = !_showIssues),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                              decoration: BoxDecoration(
-                                color: issues.any((i) => i.type == 'overflow') ? const Color(0xCCFF4757) : const Color(0xCCFFA502),
-                                borderRadius: BorderRadius.circular(20),
+                          return Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              GestureDetector(
+                                onTap: () => setState(() => _showIssues = !_showIssues),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                  decoration: BoxDecoration(
+                                    color: issues.any((i) => i.type == 'overflow') ? const Color(0xCCFF4757) : const Color(0xCCFFA502),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.white),
+                                      const SizedBox(width: 6),
+                                      Text('${issues.length}', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                                    ],
+                                  ),
+                                ),
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.white),
-                                  const SizedBox(width: 6),
-                                  Text('${issues.length}', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
-                                ],
+                              const SizedBox(width: 8),
+                              GestureDetector(
+                                onTap: () => _showSuggestions(issues),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.7),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.auto_awesome, size: 14, color: Color(0xAA22C55E)),
+                                      SizedBox(width: 6),
+                                      Text('Suggest', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                                    ],
+                                  ),
+                                ),
                               ),
-                            ),
+                            ],
                           );
                         },
                       ),
