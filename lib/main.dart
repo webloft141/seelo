@@ -1310,6 +1310,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showRulers = false;
   bool _showToolbar = true;
   bool _isLandscape = false;
+  bool _measureMode = false;
+  List<Offset> _measurePoints = [];
   bool _wasInBackground = false;
   Timer? _toolbarTimer;
   DisplayMode _displayMode = DisplayMode.fitToScreen;
@@ -1854,6 +1856,56 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     );
   }
 
+  Widget _buildMeasurementOverlay(FrameMetadata meta, double renderW, double renderH) {
+    if (_measurePoints.length < 2) {
+      if (_measurePoints.length == 1) {
+        return CustomPaint(
+          size: Size(renderW, renderH),
+          painter: _MeasurePainter(points: _measurePoints, scaled: false),
+        );
+      }
+      return const SizedBox.shrink();
+    }
+    final scaleX = renderW / meta.frameWidth;
+    final scaleY = renderH / meta.frameHeight;
+    final p0 = Offset(_measurePoints[0].dx * scaleX, _measurePoints[0].dy * scaleY);
+    final p1 = Offset(_measurePoints[1].dx * scaleX, _measurePoints[1].dy * scaleY);
+    final dist = (_measurePoints[0] - _measurePoints[1]).distance;
+    return Stack(
+      children: [
+        CustomPaint(
+          size: Size(renderW, renderH),
+          painter: _MeasurePainter(points: [p0, p1], scaled: true),
+        ),
+        Positioned(
+          left: (p0.dx + p1.dx) / 2 - 30,
+          top: (p0.dy + p1.dy) / 2 - 10,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: Colors.black.withOpacity(0.8), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.white24)),
+            child: Text('${dist.toStringAsFixed(1)}px', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        ),
+        if (_measurePoints.length == 2)
+          Positioned(
+            bottom: 120,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: GestureDetector(
+                onTap: () => setState(() { _measurePoints.clear(); _measureMode = false; }),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(color: Colors.black.withOpacity(0.8), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white24)),
+                  child: const Text('Clear Measurement', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1926,6 +1978,19 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
 
                   content = GestureDetector(
                     onTapUp: (details) {
+                      if (_measureMode) {
+                        final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+                        if (box == null) return;
+                        final localPos = box.globalToLocal(details.globalPosition);
+                        final scaleX = meta.frameWidth / renderWidth;
+                        final scaleY = meta.frameHeight / renderHeight;
+                        final f = Offset(localPos.dx * scaleX, localPos.dy * scaleY);
+                        setState(() {
+                          _measurePoints = [..._measurePoints, f];
+                          if (_measurePoints.length > 2) _measurePoints = _measurePoints.sublist(1);
+                        });
+                        return;
+                      }
                       // Convert tap position to frame-local coordinates
                       final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
                       if (box == null) return;
@@ -1990,6 +2055,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showSafeArea) _buildSafeAreaOverlay(meta, renderWidth, renderHeight),
                             if (_showGrid) _buildGridOverlay(meta, renderWidth, renderHeight),
                             if (_showRulers) _buildRulers(meta, renderWidth, renderHeight),
+                            if (_measureMode) _buildMeasurementOverlay(meta, renderWidth, renderHeight),
                           ],
                         ),
                       ),
@@ -1998,6 +2064,19 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                 } else {
                   content = GestureDetector(
                     onTapUp: (details) {
+                      if (_measureMode) {
+                        final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+                        if (box == null) return;
+                        final localPos = box.globalToLocal(details.globalPosition);
+                        final scaleX = meta.frameWidth / screenWidth;
+                        final scaleY = meta.frameHeight / (screenWidth * (meta.frameHeight / meta.frameWidth));
+                        final f = Offset(localPos.dx * scaleX, localPos.dy * scaleY);
+                        setState(() {
+                          _measurePoints = [..._measurePoints, f];
+                          if (_measurePoints.length > 2) _measurePoints = _measurePoints.sublist(1);
+                        });
+                        return;
+                      }
                       if (meta.textLayers.isEmpty) return;
                       final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
                       if (box == null) return;
@@ -2032,6 +2111,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showSafeArea) _buildSafeAreaOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_showGrid) _buildGridOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_showRulers) _buildRulers(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (_measureMode) _buildMeasurementOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                           ],
                         ),
                       ),
@@ -2286,6 +2366,11 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                     _startToolbarTimer();
                                   }),
                                   const SizedBox(width: 8),
+                                  _toolBtn(_measureMode ? Icons.horizontal_rule : Icons.straighten, () {
+                                    setState(() { _measureMode = !_measureMode; _measurePoints.clear(); });
+                                    _startToolbarTimer();
+                                  }),
+                                  const SizedBox(width: 8),
                                   _toolBtn(Icons.download_rounded, () { _takeScreenshot(); _startToolbarTimer(); }),
                                   const SizedBox(width: 8),
                                   _toolBtn(Icons.history, () { _showHistory(); _startToolbarTimer(); }),
@@ -2400,6 +2485,29 @@ class _RulerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _RulerPainter old) => old.scale != scale || old.offsetX != offsetX || old.offsetY != offsetY;
+}
+
+class _MeasurePainter extends CustomPainter {
+  final List<Offset> points;
+  final bool scaled;
+  _MeasurePainter({required this.points, this.scaled = false});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (points.isEmpty) return;
+    final dotPaint = Paint()..color = Colors.white..style = PaintingStyle.fill;
+    for (final p in points) {
+      canvas.drawCircle(p, 4, dotPaint);
+      canvas.drawCircle(p, 2, Paint()..color = const Color(0xFF22C55E)..style = PaintingStyle.fill);
+    }
+    if (points.length == 2) {
+      final linePaint = Paint()..color = Colors.white..strokeWidth = 1.5..style = PaintingStyle.stroke;
+      canvas.drawLine(points[0], points[1], linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MeasurePainter old) => old.points != points;
 }
 
 Widget _card({required Widget child}) {
