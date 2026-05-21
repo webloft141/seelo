@@ -12,6 +12,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' show User;
 import 'package:sensors_plus/sensors_plus.dart';
 import 'auth_screen.dart';
+import 'premium.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter/services.dart';
 
@@ -1491,13 +1492,19 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                     setState(() => _showGrid = v);
                   }),
                   const SizedBox(height: 8),
-                  _settingToggle('Rulers', 'Show measurement rulers', _showRulers, (v) {
-                    setState(() => _showRulers = v);
-                  }),
+                  PremiumGate(
+                    feature: PremiumFeature.rulers,
+                    child: _settingToggle('Rulers', 'Show measurement rulers', _showRulers, (v) {
+                      setState(() => _showRulers = v);
+                    }),
+                  ),
                   const SizedBox(height: 8),
-                  _settingToggle('Device Frame', 'Show bezel + notch overlay', _showDeviceFrame, (v) {
-                    setState(() => _showDeviceFrame = v);
-                  }),
+                  PremiumGate(
+                    feature: PremiumFeature.deviceFrame,
+                    child: _settingToggle('Device Frame', 'Show bezel + notch overlay', _showDeviceFrame, (v) {
+                      setState(() => _showDeviceFrame = v);
+                    }),
+                  ),
                   const SizedBox(height: 16),
                   const Text('Display Mode', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -2189,7 +2196,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         color: const Color(0xFF0C0C0C),
                         child: Stack(
                           children: [
-                            if (_overlayMode && widget.controller.previousImageData != null)
+                            if (PremiumManager.hasAccess(PremiumFeature.overlayMode) && _overlayMode && widget.controller.previousImageData != null)
                               Opacity(
                                 opacity: _overlayOpacity,
                                 child: Image.memory(
@@ -2242,9 +2249,9 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showIssues) _buildIssueOverlay(meta, renderWidth, renderHeight),
                             if (_showSafeArea) _buildSafeAreaOverlay(meta, renderWidth, renderHeight),
                             if (_showGrid) _buildGridOverlay(meta, renderWidth, renderHeight),
-                            if (_showRulers) _buildRulers(meta, renderWidth, renderHeight),
-                            if (_measureMode) _buildMeasurementOverlay(meta, renderWidth, renderHeight),
-                            if (_showDeviceFrame) _buildDeviceFrame(meta, renderWidth, renderHeight),
+                            if (PremiumManager.hasAccess(PremiumFeature.rulers) && _showRulers) _buildRulers(meta, renderWidth, renderHeight),
+                            if (PremiumManager.hasAccess(PremiumFeature.measurement) && _measureMode) _buildMeasurementOverlay(meta, renderWidth, renderHeight),
+                            if (PremiumManager.hasAccess(PremiumFeature.deviceFrame) && _showDeviceFrame) _buildDeviceFrame(meta, renderWidth, renderHeight),
                           ],
                         ),
                       ),
@@ -2253,7 +2260,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                 } else {
                   content = GestureDetector(
                     onTapUp: (details) {
-                      if (_measureMode) {
+                      if (PremiumManager.hasAccess(PremiumFeature.measurement) && _measureMode) {
                         final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
                         if (box == null) return;
                         final localPos = box.globalToLocal(details.globalPosition);
@@ -2288,7 +2295,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         physics: const ClampingScrollPhysics(),
                         child: Stack(
                           children: [
-                            if (_overlayMode && widget.controller.previousImageData != null)
+                            if (PremiumManager.hasAccess(PremiumFeature.overlayMode) && _overlayMode && widget.controller.previousImageData != null)
                               Opacity(
                                 opacity: _overlayOpacity,
                                 child: Image.memory(
@@ -2310,9 +2317,9 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             if (_showIssues) _buildIssueOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_showSafeArea) _buildSafeAreaOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                             if (_showGrid) _buildGridOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (_showRulers) _buildRulers(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (_measureMode) _buildMeasurementOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (_showDeviceFrame) _buildDeviceFrame(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (PremiumManager.hasAccess(PremiumFeature.rulers) && _showRulers) _buildRulers(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (PremiumManager.hasAccess(PremiumFeature.measurement) && _measureMode) _buildMeasurementOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (PremiumManager.hasAccess(PremiumFeature.deviceFrame) && _showDeviceFrame) _buildDeviceFrame(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
                           ],
                         ),
                       ),
@@ -2587,24 +2594,39 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                     _startToolbarTimer();
                                   }),
                                   const SizedBox(width: 8),
-                                  _toolBtn(_isLandscape ? Icons.screen_rotation : Icons.rotate_left, () {
-                                    setState(() => _isLandscape = !_isLandscape);
-                                    _startToolbarTimer();
-                                  }),
+                                  if (PremiumManager.hasAccess(PremiumFeature.landscapeMode))
+                                    _toolBtn(_isLandscape ? Icons.screen_rotation : Icons.rotate_left, () {
+                                      setState(() => _isLandscape = !_isLandscape);
+                                      _startToolbarTimer();
+                                    })
+                                  else
+                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.landscapeMode, child: const SizedBox()).showUpgrade(context)),
                                   const SizedBox(width: 8),
-                                  _toolBtn(_measureMode ? Icons.horizontal_rule : Icons.straighten, () {
-                                    setState(() { _measureMode = !_measureMode; _measurePoints.clear(); });
-                                    _startToolbarTimer();
-                                  }),
+                                  if (PremiumManager.hasAccess(PremiumFeature.measurement))
+                                    _toolBtn(_measureMode ? Icons.horizontal_rule : Icons.straighten, () {
+                                      setState(() { _measureMode = !_measureMode; _measurePoints.clear(); });
+                                      _startToolbarTimer();
+                                    })
+                                  else
+                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.measurement, child: const SizedBox()).showUpgrade(context)),
                                   const SizedBox(width: 8),
-                                  _toolBtn(_overlayMode ? Icons.layers_clear : Icons.layers, () {
-                                    setState(() => _overlayMode = !_overlayMode);
-                                    _startToolbarTimer();
-                                  }),
+                                  if (PremiumManager.hasAccess(PremiumFeature.overlayMode))
+                                    _toolBtn(_overlayMode ? Icons.layers_clear : Icons.layers, () {
+                                      setState(() => _overlayMode = !_overlayMode);
+                                      _startToolbarTimer();
+                                    })
+                                  else
+                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.overlayMode, child: const SizedBox()).showUpgrade(context)),
                                   const SizedBox(width: 8),
-                                  _toolBtn(Icons.download_rounded, () { _takeScreenshot(); _startToolbarTimer(); }),
+                                  if (PremiumManager.hasAccess(PremiumFeature.screenshotExport))
+                                    _toolBtn(Icons.download_rounded, () { _takeScreenshot(); _startToolbarTimer(); })
+                                  else
+                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.screenshotExport, child: const SizedBox()).showUpgrade(context)),
                                   const SizedBox(width: 8),
-                                  _toolBtn(Icons.history, () { _showHistory(); _startToolbarTimer(); }),
+                                  if (PremiumManager.hasAccess(PremiumFeature.sessionHistory))
+                                    _toolBtn(Icons.history, () { _showHistory(); _startToolbarTimer(); })
+                                  else
+                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.sessionHistory, child: const SizedBox()).showUpgrade(context)),
                                   const SizedBox(width: 8),
                                   _toolBtn(Icons.settings, () { _showSettings(); _startToolbarTimer(); }),
                                 ],

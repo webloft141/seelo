@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "351826158810",
+    "firebase_url": "https://seelo-acef3-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "seelo-acef3",
+    "storage_bucket": "seelo-acef3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:351826158810:android:dfc2b1613ca41f0ccc71e3",
+        "android_client_info": {
+          "package_name": "com.seelopro.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "351826158810-ld6pqkdef3lbd2j3sgd5q2lenc97a8u6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.seelopro.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "351826158810-u83koaotidtang1bc769gi41hrou9ml9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBS6bV8-6kC8bEsEOs5k2kMtPUEqhaYCbQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "351826158810-u83koaotidtang1bc769gi41hrou9ml9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
