@@ -1,6 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
 
-enum Plan { starter, pro }
+const _relayUrl = 'https://seelo-relay.onrender.com';
+
+enum Plan { free, pro, team }
 
 enum PremiumFeature {
   multiDevice,
@@ -44,7 +49,7 @@ extension PremiumFeatureMeta on PremiumFeature {
       case PremiumFeature.issueHighlighting:
       case PremiumFeature.gridOverlay:
       case PremiumFeature.safeAreaOverlay:
-        return Plan.starter;
+        return Plan.free;
       default:
         return Plan.pro;
     }
@@ -52,15 +57,50 @@ extension PremiumFeatureMeta on PremiumFeature {
 }
 
 class PremiumManager {
-  static Plan _currentPlan = Plan.starter;
+  static Plan _currentPlan = Plan.free;
+  static final ValueNotifier<Plan> planNotifier = ValueNotifier(Plan.free);
 
   static Plan get plan => _currentPlan;
 
-  static void setPlan(Plan p) => _currentPlan = p;
+  static void setPlan(Plan p) {
+    _currentPlan = p;
+    planNotifier.value = p;
+  }
+
+  static void setPlanFromString(String planId) {
+    if (planId.contains('team')) {
+      setPlan(Plan.team);
+    } else if (planId.contains('pro')) {
+      setPlan(Plan.pro);
+    } else {
+      setPlan(Plan.free);
+    }
+  }
 
   static bool hasAccess(PremiumFeature feature) {
-    if (_currentPlan == Plan.pro) return true;
-    return feature.plan == Plan.starter;
+    if (_currentPlan == Plan.pro || _currentPlan == Plan.team) return true;
+    return feature.plan == Plan.free;
+  }
+
+  /// Sync plan from relay server. Call once on app start and after login.
+  static Future<void> syncFromServer() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) { setPlan(Plan.free); return; }
+    try {
+      final token = await user.getIdToken();
+      final res = await http.get(
+        Uri.parse('$_relayUrl/api/user'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setPlanFromString(data['plan'] ?? 'free');
+      } else {
+        setPlan(Plan.free);
+      }
+    } catch (_) {
+      // Keep current plan on network error
+    }
   }
 }
 
@@ -100,7 +140,7 @@ class ProLocked extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(0xCC1C1C1E),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF22C55E).withOpacity(0.3)),
+                  border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -136,7 +176,7 @@ class ProLocked extends StatelessWidget {
             const SizedBox(height: 16),
             const Text('Pro Feature', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            Text('"${feature.label}" is available in Pro Early Access\nUpgrade to unlock all premium features.',
+            Text('"${feature.label}" is available in Pro.\nUpgrade to unlock all premium features.',
                 textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFF888888), fontSize: 14)),
             const SizedBox(height: 24),
             SizedBox(
@@ -163,3 +203,5 @@ class ProLocked extends StatelessWidget {
     );
   }
 }
+
+

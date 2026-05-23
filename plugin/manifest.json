@@ -4,9 +4,16 @@
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
-  "capabilities": [],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "Connect to relay server for real-time preview and authentication"
+  },
   "enableProposedApi": false,
   "editorType": [
     "figma"
+  ],
+  "permissions": [
+    "currentuser"
   ]
 }

@@ -1,4 +1,6 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="seelo"
         android:name="${applicationName}"
@@ -25,6 +27,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <activity android:name="com.razorpay.CheckoutActivity" android:exported="false" android:launchMode="singleTask" android:configChanges="keyboard|keyboardHidden|screenLayout|screenSize|orientation|smallestScreenSize" tools:replace="android:configChanges"></activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

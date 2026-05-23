@@ -1,5 +1,18 @@
 figma.showUI(__html__, { width: 340, height: 520 });
 
+let debounceTimer = null;
+
+(async () => {
+    // Required before registering documentchange with dynamic-page
+    await figma.loadAllPagesAsync().catch(() => {});
+    figma.on("documentchange", (event) => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => syncSelection(), 700);
+    });
+})();
+
+figma.on("selectionchange", syncSelection);
+
 async function syncSelection() {
     let selection = figma.currentPage.selection;
     if (selection.length === 0) {
@@ -131,18 +144,6 @@ function extractSolidColor(node) {
         return '#ffffff';
     } catch (e) { return '#ffffff'; }
 }
-
-let debounceTimer = null;
-figma.on("documentchange", (event) => {
-    if (debounceTimer) {
-        clearTimeout(debounceTimer);
-    }
-    debounceTimer = setTimeout(() => {
-        syncSelection();
-    }, 700);
-});
-
-figma.on("selectionchange", syncSelection);
 
 figma.ui.onmessage = async (msg) => {
     const selection = figma.currentPage.selection;

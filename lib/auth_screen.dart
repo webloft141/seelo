@@ -43,8 +43,15 @@ class AuthService {
 
   Future<void> signOut() => _auth.signOut();
 
-  Future<void> sendPasswordReset(String email) async {
-    await _auth.sendPasswordResetEmail(email: email);
+  Future<String?> sendPasswordReset(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      return null;
+    } on FirebaseAuthException catch (e) {
+      return e.message ?? 'Reset failed';
+    } catch (_) {
+      return 'Connection error. Check your internet.';
+    }
   }
 }
 
@@ -114,7 +121,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TabBar(
                     controller: _tab,
                     indicator: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
+                      color: Colors.white.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     indicatorSize: TabBarIndicatorSize.tab,
@@ -164,11 +171,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 if (_tab.index == 0) ...[
                   const SizedBox(height: 16),
                   TextButton(
-                    onPressed: () {
+                    onPressed: () async {
                       final e = _emailCtrl.text.trim();
                       if (e.isEmpty) { setState(() => _error = 'Enter email first'); return; }
-                      _auth.sendPasswordReset(e);
-                      setState(() => _error = 'Reset link sent (if email exists)');
+                      final err = await _auth.sendPasswordReset(e);
+                      setState(() => _error = err ?? 'Reset link sent (if email exists)');
                     },
                     child: const Text('Forgot password?', style: TextStyle(color: Color(0xFF888888), fontSize: 13)),
                   ),

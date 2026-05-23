@@ -86,6 +86,18 @@
                 document.getElementById('status-text').innerText = count + ' viewer' + (count !== 1 ? 's' : '');
             });
 
+            socket.on('device-replaced', ({ message }) => {
+                document.getElementById('loader').innerHTML = '<div style="font-size:40px;">📱</div><div class="loader-text" style="color:#ffa502;">Disconnected</div><div style="font-size:13px;color:#94a3b8;max-width:280px;text-align:center;margin-top:8px;">' + (message || 'Another device connected to this session') + '.</div>';
+                document.getElementById('status-text').innerText = 'Replaced';
+                document.getElementById('status-dot').className = 'dot red';
+            });
+
+            socket.on('room-full', ({ max, current }) => {
+                document.getElementById('loader').innerHTML = '<div style="font-size:40px;">🚫</div><div class="loader-text" style="color:#ff4757;">Device Limit Reached</div><div style="font-size:13px;color:#94a3b8;max-width:280px;text-align:center;margin-top:8px;">This session already has ' + current + ' device' + (current !== 1 ? 's' : '') + ' connected. Maximum is ' + max + ' device' + (max !== 1 ? 's' : '') + '.</div>';
+                document.getElementById('status-text').innerText = 'Limited';
+                document.getElementById('status-dot').className = 'dot red';
+            });
+
             socket.on('cloud-design', (data) => {
                 document.getElementById('loader').style.display = 'none';
                 const wrapper = document.getElementById('canvas-wrapper');

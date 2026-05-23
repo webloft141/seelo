@@ -2,16 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart' show User;
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'auth_screen.dart';
+import 'subscription_screen.dart';
 import 'premium.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter/services.dart';
@@ -46,6 +47,15 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await Firebase.initializeApp();
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    ui.PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
+    // Sync plan on auth changes (fires on app start if already logged in)
+    FirebaseAuth.instance.authStateChanges().listen((_) {
+      PremiumManager.syncFromServer().catchError((_) {});
+    });
   } catch (_) {
     // Firebase not configured — auth disabled
   }
@@ -102,7 +112,7 @@ class _SeeloAppState extends State<SeeloApp> {
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFF0C0C0C),
         appBarTheme: const AppBarTheme(
-          backgroundColor: const Color(0xFF0C0C0C),
+          backgroundColor: Color(0xFF0C0C0C),
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           foregroundColor: Colors.white,
@@ -219,11 +229,13 @@ class SeeloConnectionController {
   final ValueNotifier<List<SavedDevice>> savedDevices = ValueNotifier([]);
   final ValueNotifier<List<DesignIssue>> issues = ValueNotifier([]);
   final ValueNotifier<int> viewerCount = ValueNotifier(0);
+  final ValueNotifier<String?> lastError = ValueNotifier<String?>(null);
   final List<SessionEntry> sessionHistory = [];
   final List<DevicePreset> customPresets = [];
 
   Timer? _designTimeout;
   Timer? _pingTimer;
+  void Function(int max, int current)? _onRoomFull;
   int _reconnectCount = 0;
   int _latencySum = 0;
   int _latencySamples = 0;
@@ -259,6 +271,7 @@ class SeeloConnectionController {
   }
 
   void _connectToRelay(String relayUrl, String sessionId, {VoidCallback? onConnected, void Function(String message)? onError, void Function(String message)? onStatus}) {
+    lastError.value = null;
     if (relayUrl.isEmpty || sessionId.isEmpty) {
       onError?.call('Invalid relay link');
       return;
@@ -286,14 +299,22 @@ class SeeloConnectionController {
     );
     _socket = socket;
 
-    socket.onConnect((_) {
+    socket.onConnect((_) async {
       if (_disposed) return;
       connecting = false;
       _reconnectCount = 0;
       connectionQuality.value = ConnectionQuality.good;
       viewerCount.value = 0;
       sessionHistory.insert(0, SessionEntry('Cloud: ${sessionId.length > 8 ? sessionId.substring(0, 8) : sessionId}...', DateTime.now(), isCloud: true));
-      socket.emit('join-session', {'sessionId': sessionId, 'role': 'viewer'});
+      final payload = <String, dynamic>{'sessionId': sessionId, 'role': 'viewer'};
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          payload['uid'] = user.uid;
+          payload['idToken'] = await user.getIdToken();
+        }
+      } catch (_) {}
+      socket.emit('join-session', payload);
       onConnected?.call();
       onStatus?.call('Cloud connected');
     });
@@ -335,6 +356,39 @@ class SeeloConnectionController {
       viewerCount.value = (count is num) ? count.toInt() : 0;
     });
 
+    socket.on('room-full', (data) {
+      if (_disposed) return;
+      final max = data is Map ? (data['max'] ?? 1) : 1;
+      final current = data is Map ? (data['current'] ?? 0) : 0;
+      final msg = 'Device limit reached ($current/$max)';
+      lastError.value = msg;
+      onError?.call(msg);
+      onStatus?.call('Max $max device(s)');
+      socket.disconnect();
+      _onRoomFull?.call(max, current);
+    });
+
+    socket.on('device-replaced', (data) {
+      if (_disposed) return;
+      final msg = data is Map ? (data['message'] ?? 'Connected from another device') : 'Connected from another device';
+      lastError.value = msg;
+      onError?.call(msg);
+      onStatus?.call('Replaced by new device');
+      socket.disconnect();
+    });
+
+    socket.on('rate-limited', (data) {
+      if (_disposed) return;
+      final msg = data is Map ? (data['message'] ?? 'Slow down') : 'Slow down';
+      onStatus?.call(msg);
+    });
+
+    socket.on('server-shutdown', (_) {
+      if (_disposed) return;
+      onStatus?.call('Server restarting...');
+      socket.disconnect();
+    });
+
     socket.onConnectError((err) {
       if (_disposed) return;
       connecting = false;
@@ -353,7 +407,9 @@ class SeeloConnectionController {
     socket.onReconnect((_) {
       if (_disposed) return;
       connectionQuality.value = ConnectionQuality.good;
-      socket.emit('join-session', {'sessionId': sessionId, 'role': 'viewer'});
+      final payload = <String, dynamic>{'sessionId': sessionId, 'role': 'viewer'};
+      FirebaseAuth.instance.currentUser?.uid;
+      socket.emit('join-session', payload);
       onStatus?.call('Reconnected');
     });
 
@@ -406,20 +462,19 @@ class SeeloConnectionController {
     );
     _socket = socket;
 
-    void joinAndRequestSync() {
-      socket.emit('join-room', {
-        'roomId': roomId, 'roomSecret': roomSecret,
-        'role': 'mobile', 'deviceName': 'Seelo Mobile',
-        'screenWidth': config.screenWidth, 'screenHeight': config.screenHeight,
-      });
-      socket.emit('request-resize', {
-        'type': 'resize-frame', 'name': 'Seelo Mobile',
-        'width': config.screenWidth, 'height': config.screenHeight,
-        'roomId': roomId, 'roomSecret': roomSecret,
-      });
+    Future<void> joinAndRequestSync() async {
+      final payload = <String, dynamic>{'sessionId': roomId, 'role': 'viewer'};
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          payload['uid'] = user.uid;
+          payload['idToken'] = await user.getIdToken();
+        }
+      } catch (_) {}
+      socket.emit('join-session', payload);
     }
 
-    socket.onConnect((_) {
+    socket.onConnect((_) async {
       if (_disposed) return;
       serverLabel = '$ip:$port';
       _reconnectCount = 0;
@@ -428,7 +483,7 @@ class SeeloConnectionController {
       connectionQuality.value = ConnectionQuality.good;
       _saveDevice(ip, port);
       sessionHistory.insert(0, SessionEntry('Desktop: $ip:$port', DateTime.now()));
-      joinAndRequestSync();
+      await joinAndRequestSync();
       _startPing();
       onConnected?.call();
       onStatus?.call('Connected');
@@ -476,6 +531,12 @@ class SeeloConnectionController {
       if (_disposed) return;
       final msg = payload is Map ? (payload['message'] ?? 'Server error').toString() : 'Server error';
       onError?.call(msg);
+    });
+
+    socket.on('server-shutdown', (_) {
+      if (_disposed) return;
+      onStatus?.call('Server restarting...');
+      socket.disconnect();
     });
 
     socket.onConnectError((err) {
@@ -826,7 +887,7 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           ValueListenableBuilder<ConnectionQuality>(
             valueListenable: widget.controller.connectionQuality,
-            builder: (_, q, __) {
+            builder: (_, q, _) {
               final dotColor = q == ConnectionQuality.good ? const Color(0xFF22C55E)
                 : q == ConnectionQuality.fair ? const Color(0xFFEAB308)
                 : q == ConnectionQuality.poor ? const Color(0xFFEF4444)
@@ -834,7 +895,7 @@ class _HomeScreenState extends State<HomeScreen> {
               return Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Tooltip(
-                  message: q == ConnectionQuality.disconnected ? 'Disconnected' : '${widget.controller.serverLabel}',
+                  message: q == ConnectionQuality.disconnected ? 'Disconnected' : widget.controller.serverLabel,
                   child: Container(
                     width: 10, height: 10, margin: const EdgeInsets.only(right: 4),
                     decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
@@ -842,6 +903,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               );
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.workspace_premium, color: Color(0xFF6366F1)),
+            tooltip: 'Plans',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SubscriptionScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.white70),
@@ -920,7 +986,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 10),
                   ValueListenableBuilder<ConnectionQuality>(
                     valueListenable: widget.controller.connectionQuality,
-                    builder: (_, q, __) {
+                    builder: (_, q, _) {
                       final dotColor = q == ConnectionQuality.good ? const Color(0xFF22C55E)
                         : q == ConnectionQuality.fair ? const Color(0xFFEAB308)
                         : q == ConnectionQuality.poor ? const Color(0xFFEF4444)
@@ -943,9 +1009,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.15),
+                          color: Colors.red.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red.withOpacity(0.3)),
+                          border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
                         ),
                         child: Text(_error, style: const TextStyle(color: Color(0xFFF5A0A0), fontSize: 13)),
                       ),
@@ -956,7 +1022,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // Saved devices
             ValueListenableBuilder<List<SavedDevice>>(
               valueListenable: widget.controller.savedDevices,
-              builder: (_, devices, __) {
+              builder: (_, devices, _) {
                 if (devices.isEmpty) return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.only(top: 14),
@@ -1227,8 +1293,23 @@ class _LoginScreenState extends State<LoginScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      onPressed: () {
-                        setState(() => _error = 'Email login flow can be wired to backend next.');
+                      onPressed: () async {
+                        try {
+                          await FirebaseAuth.instance.signInWithEmailAndPassword(
+                            email: _email.text.trim(),
+                            password: _password.text,
+                          );
+                          if (!context.mounted) return;
+                          Navigator.of(context).pop();
+                        } on FirebaseAuthException catch (e) {
+                          setState(() {
+                            _error = e.code == 'user-not-found' ? 'No account found'
+                                : e.code == 'wrong-password' ? 'Incorrect password'
+                                : e.code == 'invalid-credential' ? 'Invalid email or password'
+                                : e.code == 'too-many-requests' ? 'Too many attempts'
+                                : e.message ?? 'Login failed';
+                          });
+                        }
                       },
                       child: const Text('Login'),
                     ),
@@ -1377,7 +1458,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showRulers = false;
   bool _showDeviceFrame = false;
   bool _overlayMode = false;
-  double _overlayOpacity = 0.5;
+  final double _overlayOpacity = 0.5;
   bool _showToolbar = true;
   bool _isLandscape = false;
   bool _measureMode = false;
@@ -1397,6 +1478,64 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     _applySystemUiMode();
     _shakeSub = accelerometerEventStream().listen(_handleShake);
     _startToolbarTimer();
+    widget.controller.lastError.addListener(_onConnectionError);
+  }
+
+  void _onConnectionError() {
+    final err = widget.controller.lastError.value;
+    if (err == null || !mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1B23),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.link_off_rounded, color: Color(0xFFEF4444), size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text('Disconnected', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(err, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14, height: 1.4)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2D2E3A), borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 14, color: Color(0xFF64748B)),
+                  SizedBox(width: 6),
+                  Text('Free plan: 1 active device', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              widget.controller.lastError.value = null;
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pop();
+            },
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF94A3B8)),
+            child: const Text('Go Back'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1560,7 +1699,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                 margin: const EdgeInsets.only(bottom: 4),
                                 decoration: BoxDecoration(
-                                  color: active ? Colors.white.withOpacity(0.1) : Colors.transparent,
+                                  color: active ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
                                   borderRadius: BorderRadius.circular(8),
                                   border: active ? Border.all(color: Colors.white24) : null,
                                 ),
@@ -1616,7 +1755,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
               ),
               onPressed: () {
                 Navigator.of(context).pop();
-                Navigator.of(this.context).pop();
+                Navigator.of(context).pop();
               },
               child: const Text('Exit Preview'),
             ),
@@ -1658,7 +1797,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: history.length,
-                    separatorBuilder: (_, __) => const Divider(color: AppPalette.border, height: 1),
+                    separatorBuilder: (_, _) => const Divider(color: AppPalette.border, height: 1),
                     itemBuilder: (_, i) {
                       final entry = history[i];
                       final icon = entry.isCloud ? Icons.cloud : Icons.desktop_windows;
@@ -1710,7 +1849,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: issues.length,
-                  separatorBuilder: (_, __) => const Divider(color: AppPalette.border, height: 1),
+                  separatorBuilder: (_, _) => const Divider(color: AppPalette.border, height: 1),
                   itemBuilder: (_, i) {
                     final issue = issues[i];
                     final icon = issue.type == 'overflow' ? Icons.arrow_outward : issue.type == 'spacing' ? Icons.space_bar : Icons.layers;
@@ -1787,7 +1926,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: active ? Colors.white.withOpacity(0.1) : Colors.transparent,
+          color: active ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
           border: Border.all(color: active ? Colors.white : AppPalette.border),
           borderRadius: BorderRadius.circular(10),
         ),
@@ -1831,7 +1970,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
             ],
           ),
         ),
-        Switch(value: val, onChanged: onChanged, activeColor: Colors.white),
+        Switch(value: val, onChanged: onChanged, activeThumbColor: Colors.white),
       ],
     );
   }
@@ -1927,7 +2066,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     final scaleY = renderH / meta.frameHeight;
     return ValueListenableBuilder<List<DesignIssue>>(
       valueListenable: widget.controller.issues,
-      builder: (_, list, __) {
+      builder: (_, list, _) {
         return Stack(
           children: list.map((issue) {
             final color = issue.type == 'overflow' ? const Color(0x44FF4757) : const Color(0x44FFA502);
@@ -2032,7 +2171,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
           // Bottom home indicator (small pill)
           Positioned(
             bottom: 4, left: renderW / 2 - 25, width: 50, height: 4,
-            child: Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.3), borderRadius: BorderRadius.circular(2))),
+            child: Container(decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(2))),
           ),
         ],
       ),
@@ -2065,7 +2204,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
           top: (p0.dy + p1.dy) / 2 - 10,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: Colors.black.withOpacity(0.8), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.white24)),
+            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.white24)),
             child: Text('${dist.toStringAsFixed(1)}px', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
           ),
         ),
@@ -2079,7 +2218,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                 onTap: () => setState(() { _measurePoints.clear(); _measureMode = false; }),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(color: Colors.black.withOpacity(0.8), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white24)),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white24)),
                   child: const Text('Clear Measurement', style: TextStyle(color: Colors.white70, fontSize: 12)),
                 ),
               ),
@@ -2091,6 +2230,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
 
   @override
   void dispose() {
+    widget.controller.lastError.removeListener(_onConnectionError);
     WidgetsBinding.instance.removeObserver(this);
     _shakeSub?.cancel();
     _toolbarTimer?.cancel();
@@ -2125,7 +2265,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
           color: Colors.black,
           child: ValueListenableBuilder<int>(
             valueListenable: widget.controller.imageVersion,
-            builder: (context, _, __) {
+            builder: (context, _, _) {
               final imageData = widget.controller.currentImageData;
               final meta = widget.controller.currentMetadata;
 
@@ -2224,7 +2364,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.7),
+                                  color: Colors.black.withValues(alpha: 0.7),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -2240,7 +2380,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.7),
+                                  color: Colors.black.withValues(alpha: 0.7),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: const Text('Tap text to inspect', style: TextStyle(color: Colors.white38, fontSize: 10)),
@@ -2364,7 +2504,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             onTap: _toggleToolbar,
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(6)),
+                              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(6)),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -2386,7 +2526,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                           if (widget.controller.serverLabel == 'Cloud')
                             ValueListenableBuilder<int>(
                               valueListenable: widget.controller.viewerCount,
-                              builder: (_, count, __) {
+                              builder: (_, count, _) {
                                 if (count <= 0) return const SizedBox.shrink();
                                 return Padding(
                                   padding: const EdgeInsets.only(top: 4),
@@ -2415,7 +2555,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                       left: 12,
                       child: ValueListenableBuilder<List<DesignIssue>>(
                         valueListenable: widget.controller.issues,
-                        builder: (_, issues, __) {
+                        builder: (_, issues, _) {
                           if (issues.isEmpty) return const SizedBox.shrink();
                           return Row(
                             mainAxisSize: MainAxisSize.min,
@@ -2444,7 +2584,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.7),
+                                    color: Colors.black.withValues(alpha: 0.7),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(color: Colors.white24),
                                   ),
@@ -2469,7 +2609,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                     right: 8,
                     child: ValueListenableBuilder<ConnectionQuality>(
                       valueListenable: widget.controller.connectionQuality,
-                      builder: (_, q, __) {
+                      builder: (_, q, _) {
                         final (color, label) = switch (q) {
                           ConnectionQuality.good => (const Color(0xFF22C55E), 'Good'),
                           ConnectionQuality.fair => (const Color(0xFFEAB308), 'Fair'),
@@ -2480,7 +2620,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                           onTap: _toggleToolbar,
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(6)),
+                            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(6)),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -2497,7 +2637,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                   // Reconnecting overlay
                   ValueListenableBuilder<ConnectionQuality>(
                     valueListenable: widget.controller.connectionQuality,
-                    builder: (_, q, __) {
+                    builder: (_, q, _) {
                       if (q == ConnectionQuality.good || q == ConnectionQuality.fair) return const SizedBox.shrink();
                       return Positioned(
                         top: 0, left: 0, right: 0, bottom: 0,
@@ -2517,7 +2657,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                   ),
                                   ValueListenableBuilder<int>(
                                     valueListenable: widget.controller.latencyMs,
-                                    builder: (_, lat, __) => lat > 0
+                                    builder: (_, lat, _) => lat > 0
                                       ? Text('${lat}ms latency', style: const TextStyle(color: Colors.white38, fontSize: 12))
                                       : const SizedBox.shrink(),
                                   ),
@@ -2543,7 +2683,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.8),
+                                color: Colors.black.withValues(alpha: 0.8),
                                 borderRadius: BorderRadius.circular(99),
                                 border: Border.all(color: Colors.white24, width: 0.5),
                               ),
@@ -2553,7 +2693,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                   // Quality dot
                                   ValueListenableBuilder<ConnectionQuality>(
                                     valueListenable: widget.controller.connectionQuality,
-                                    builder: (_, q, __) {
+                    builder: (_, q, _) {
                                       final c = q == ConnectionQuality.good ? const Color(0xFF22C55E)
                                         : q == ConnectionQuality.fair ? const Color(0xFFEAB308)
                                         : q == ConnectionQuality.poor ? const Color(0xFFEF4444)
@@ -2567,7 +2707,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                   if (widget.controller.serverLabel == 'Cloud')
                                     ValueListenableBuilder<int>(
                                       valueListenable: widget.controller.viewerCount,
-                                      builder: (_, count, __) {
+                                      builder: (_, count, _) {
                                         final label = count > 1 ? '$count viewers' : count == 1 ? '1 viewer' : '';
                                         if (label.isEmpty) return const SizedBox.shrink();
                                         return Padding(
