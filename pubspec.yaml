@@ -41,6 +41,7 @@ dependencies:
   firebase_auth: ^6.5.1
   firebase_crashlytics: ^5.2.2
   http: ^1.2.1
+  share_plus: ^13.1.0
 
 
 dev_dependencies:

@@ -132,7 +132,7 @@
                 <span class="conn-ip ml-auto" id="lbl-ip">127.0.0.1:3001</span>
             </div>
             <div class="card-row" style="margin-top:4px;">
-                <input id="server-url" class="text-input" value="127.0.0.1:3001" placeholder="Server address" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:11px;" />
+                <input id="server-url" class="text-input" value="127.0.0.1:3000" placeholder="Server address" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:11px;" />
                 <button class="btn-s" style="width:auto;padding:6px 10px;" onclick="applyServerUrl()">Apply</button>
             </div>
         </div>
@@ -419,8 +419,8 @@
         let connectIndex = 0;
         let roomSecret = '';
         let socketTargets = [
-            'http://127.0.0.1:3001',
-            'http://localhost:3001'
+            'http://127.0.0.1:3000',
+            'http://localhost:3000'
         ];
 
         function applyServerUrl() {

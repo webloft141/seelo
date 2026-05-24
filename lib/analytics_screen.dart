@@ -34,7 +34,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     super.dispose();
   }
 
-  Future<void> _fetchAnalytics() async {
+  Future<void> _fetchAnalytics({bool retried = false}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
@@ -43,6 +43,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         Uri.parse('$_relayUrl/api/analytics'),
         headers: {'Authorization': 'Bearer $token'},
       );
+      if (res.statusCode == 401 && !retried) {
+        await user.getIdToken(true);
+        return _fetchAnalytics(retried: true);
+      }
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() {

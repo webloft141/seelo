@@ -27,7 +27,7 @@ class _TeamWorkspaceScreenState extends State<TeamWorkspaceScreen> {
     _fetchTeam();
   }
 
-  Future<void> _fetchTeam() async {
+  Future<void> _fetchTeam({bool retried = false}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
@@ -36,6 +36,10 @@ class _TeamWorkspaceScreenState extends State<TeamWorkspaceScreen> {
         Uri.parse('$_relayUrl/api/team'),
         headers: {'Authorization': 'Bearer $token'},
       );
+      if (res.statusCode == 401 && !retried) {
+        await user.getIdToken(true);
+        return _fetchTeam(retried: true);
+      }
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() {

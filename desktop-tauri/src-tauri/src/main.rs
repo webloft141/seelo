@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tokio::sync::RwLock;
 use qrcode::{render::svg, QrCode};
+use tauri_plugin_autostart::MacosLauncher;
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct MobileInfo {
@@ -216,6 +217,56 @@ async fn get_full_export(
     Ok(st.full_export_cache.clone())
 }
 
+#[derive(Serialize)]
+struct AnalyticsData {
+    total_sessions: u64,
+    total_previews: u64,
+    active_connections: usize,
+}
+
+#[tauri::command]
+async fn get_analytics(
+    state: tauri::State<'_, Arc<RwLock<AppState>>>,
+) -> Result<AnalyticsData, String> {
+    let app_state = state.inner().clone();
+    let st = app_state.read().await;
+    let active_connections = st.mobiles.len();
+    Ok(AnalyticsData {
+        total_sessions: if st.plugin_socket.is_some() { 1 } else { 0 },
+        total_previews: if st.design_cache.is_some() { active_connections as u64 } else { 0 },
+        active_connections,
+    })
+}
+
+#[derive(Serialize)]
+struct TeamData {
+    team_name: String,
+    plan: String,
+    member_count: u64,
+    max_members: u64,
+    features: Vec<String>,
+}
+
+#[tauri::command]
+async fn get_team_info(
+    state: tauri::State<'_, Arc<RwLock<AppState>>>,
+) -> Result<TeamData, String> {
+    let app_state = state.inner().clone();
+    let st = app_state.read().await;
+    let count = st.mobiles.len() as u64 + if st.plugin_socket.is_some() { 1 } else { 0 };
+    Ok(TeamData {
+        team_name: "My Desktop Team".into(),
+        plan: "team".into(),
+        member_count: count,
+        max_members: 25,
+        features: vec![
+            "Unlimited local previews".into(),
+            "Desktop + mobile devices".into(),
+            "No cloud dependency".into(),
+        ],
+    })
+}
+
 fn emit_event(app_handle: &Option<tauri::AppHandle>, event: &str, payload: impl Serialize + Clone) {
     eprintln!("[emit_event] event={} has_handle={}", event, app_handle.is_some());
     if let Some(handle) = app_handle {
@@ -234,18 +285,18 @@ fn ns_handler(
     eprintln!("[ns_handler] socket connected: id={}", socket.id);
     let io1 = io.clone();
     let s1 = state.clone();
-    socket.on("join-room", move |_socket: SocketRef, Data::<serde_json::Value>(payload)| {
-        eprintln!("[join-room] received role={:?}", payload.get("role"));
+    socket.on("join-session", move |_socket: SocketRef, Data::<serde_json::Value>(payload)| {
+        eprintln!("[join-session] received role={:?}", payload.get("role"));
         let state = s1.clone();
         let io = io1.clone();
         let sid = _socket.id.to_string();
         let role = payload.get("role").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-        let room: String = payload.get("roomId").and_then(|v| v.as_str()).unwrap_or("seelo-desktop").to_string();
-        let _ = _socket.join(room.clone());
+        let session_id: String = payload.get("sessionId").and_then(|v| v.as_str()).unwrap_or("seelo-desktop").to_string();
+        let _ = _socket.join(session_id.clone());
         let p = payload.clone();
 
         tokio::spawn(async move {
-            eprintln!("[task] join-room task started, acquiring write lock...");
+                eprintln!("[task] join-session task started...");
             let mut st = state.write().await;
             eprintln!("[task] write lock acquired, role={}", role);
             if role == "plugin" {
@@ -262,8 +313,11 @@ fn ns_handler(
                     .map(|v| v.to_string());
                 let _ = _socket.emit("join-ack", &serde_json::json!({
                     "ok": true,
-                    "roomId": room,
+                    "roomId": session_id,
                     "role": "plugin"
+                }));
+                let _ = _socket.emit("room-registered", &serde_json::json!({
+                    "roomSecret": st.room_secret.clone().unwrap_or_default(),
                 }));
                 emit_event(&st.app_handle, "plugin-status", "connected");
                 // Backfill currently connected mobiles to freshly connected plugin UI.
@@ -287,7 +341,7 @@ fn ns_handler(
                     }
                 }
             }
-            if role == "mobile" {
+            if role == "mobile" || role == "viewer" {
                 let name = p.get("deviceName").and_then(|v| v.as_str()).unwrap_or("Mobile").to_string();
                 let w = p.get("screenWidth").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let h = p.get("screenHeight").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
@@ -326,7 +380,7 @@ fn ns_handler(
 
     let io2 = io.clone();
     let s2 = state.clone();
-    socket.on("design-update", move |_: SocketRef, Data::<serde_json::Value>(data)| {
+    socket.on("cloud-design", move |_: SocketRef, Data::<serde_json::Value>(data)| {
         let state = s2.clone();
         let io = io2.clone();
         tokio::spawn(async move {
@@ -471,6 +525,10 @@ async fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .manage(state.clone())
         .manage(io)
         .invoke_handler(tauri::generate_handler![
@@ -480,29 +538,30 @@ async fn main() {
             get_local_ip,
             get_plugin_health,
             get_pairing_qr,
-            get_full_export
+            get_full_export,
+            get_analytics,
+            get_team_info
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
             let st = setup_state.clone();
             let r = router_arc.clone();
 
-            // Load or generate persistent room secret
             let secret_path = app.path().app_config_dir().map(|p| p.join("seelo_secret.json"));
-            if let Ok(path) = &secret_path {
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    if let Ok(data) = serde_json::from_str::<std::collections::HashMap<String, String>>(&content) {
-                        if let Some(s) = data.get("room_secret") {
-                            let mut state = st.blocking_write();
-                            state.room_secret = Some(s.clone());
-                        }
-                    }
-                }
-            }
 
             tokio::spawn(async move {
                 let mut s = st.write().await;
                 s.app_handle = Some(handle.clone());
+                // Load persisted room secret
+                if let Ok(path) = &secret_path {
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        if let Ok(data) = serde_json::from_str::<std::collections::HashMap<String, String>>(&content) {
+                            if let Some(secret) = data.get("room_secret") {
+                                s.room_secret = Some(secret.clone());
+                            }
+                        }
+                    }
+                }
                 // Generate and persist secret if not loaded from file
                 if s.room_secret.is_none() {
                     let secret = generate_secret();

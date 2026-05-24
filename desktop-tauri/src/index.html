@@ -131,6 +131,25 @@
     .settings-area input:focus { border-color: #111; }
     .settings-area button { padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; }
     .settings-area button:hover { opacity: 0.85; }
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid #eee;
+    }
+    .setting-label { display: flex; flex-direction: column; gap: 2px; }
+    .setting-label span:first-child { font-size: 12px; font-weight: 600; color: #222; }
+    .setting-desc { font-size: 10px; color: #888; }
+    .toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: #ccc; border-radius: 22px; transition: 0.2s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute; width: 16px; height: 16px;
+      left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: #111; }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
   </style>
 </head>
 <body>
@@ -232,7 +251,18 @@
 
       <div id="page-settings" class="hidden">
         <div class="card full settings-area">
-          <h3>Settings</h3>
+          <h3>General</h3>
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Launch at startup</span>
+              <span class="setting-desc">Automatically start Seelo when you log in</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="autostart-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <h3 style="margin-top:8px;">Server</h3>
           <label>Server Address</label>
           <input type="text" id="settings-server-addr" readonly>
           <label>Room ID</label>

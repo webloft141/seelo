@@ -141,6 +141,7 @@ app.get('/health', (req, res) => {
     uptime,
     version: '2.0.0',
     clients: io?.engine?.clientsCount || 0,
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -416,19 +417,28 @@ io.on('connection', (socket) => {
 });
 
 // ── Start ───────────────────────────────────────────────────────────
-const gracefulShutdown = () => {
-  logger.info('Shutting down...');
-  io.close();
-  server.close(() => {
-    db.close();
-    logger.info('Server stopped');
-    process.exit(0);
+const gracefulShutdown = (signal) => {
+  logger.info(`${signal} received — shutting down gracefully...`);
+  // Notify all connected clients
+  io.emit('server-shutdown', { message: 'Server is restarting, reconnect shortly' });
+  // Close all sockets
+  io.close(() => {
+    logger.info('All socket connections closed');
+    server.close(() => {
+      db.close();
+      logger.info('Server stopped');
+      process.exit(0);
+    });
   });
-  setTimeout(() => process.exit(1), 10000);
+  // Force exit after 5s regardless
+  setTimeout(() => {
+    logger.error('Forced exit after timeout');
+    process.exit(1);
+  }, 5000);
 };
 
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 server.listen(PORT, HOST, () => {
   logger.info(`Seelo Server v2.0.0 running on ${HOST}:${PORT}`);

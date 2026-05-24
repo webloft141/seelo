@@ -40,7 +40,7 @@ class _DeviceManagerScreenState extends State<DeviceManagerScreen> {
     super.dispose();
   }
 
-  Future<void> _fetchDevices() async {
+  Future<void> _fetchDevices({bool retried = false}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
@@ -49,6 +49,10 @@ class _DeviceManagerScreenState extends State<DeviceManagerScreen> {
         Uri.parse('$_relayUrl/api/devices'),
         headers: {'Authorization': 'Bearer $token'},
       );
+      if (res.statusCode == 401 && !retried) {
+        await user.getIdToken(true);
+        return _fetchDevices(retried: true);
+      }
       if (res.statusCode == 200 && mounted) {
         final data = jsonDecode(res.body);
         setState(() {

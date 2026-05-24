@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { isEnabled, enable, disable } from "@tauri-apps/plugin-autostart";
 
 const runtimeMobiles = new Map();
 let devicePollTimer = null;
@@ -334,6 +335,25 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     el.addEventListener('click', () => showPage(el.dataset.page));
   });
+
+  const autostartToggle = document.getElementById('autostart-toggle');
+  isEnabled().then(enabled => {
+    if (autostartToggle) autostartToggle.checked = enabled;
+  }).catch(() => {});
+  if (autostartToggle) {
+    autostartToggle.addEventListener('change', async () => {
+      try {
+        if (autostartToggle.checked) {
+          await enable();
+        } else {
+          await disable();
+        }
+      } catch (e) {
+        console.error('Autostart toggle failed:', e);
+        autostartToggle.checked = !autostartToggle.checked;
+      }
+    });
+  }
 
   document.getElementById('sync-btn').addEventListener('click', () => sendToPlugin({ type: 'manual-sync' }));
   document.getElementById('export-btn').addEventListener('click', async () => {

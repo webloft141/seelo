@@ -5,3 +5,9 @@ build/
 .dart_tool/
 .pub-cache/
 *.log
+
+# Firebase service account (keep secret!)
+relay/service-account.json
+
+# Relay persistence (user data, plan info)
+relay/store-data.json
