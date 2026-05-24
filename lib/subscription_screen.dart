@@ -7,6 +7,7 @@ import 'premium.dart';
 import 'device_manager_screen.dart';
 import 'team_workspace_screen.dart';
 import 'analytics_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const _relayUrl = 'https://seelo-relay.onrender.com';
 
@@ -253,6 +254,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
                     ),
                   ),
                 ],
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: () => launchUrl(Uri.parse('$_relayUrl/terms'), mode: LaunchMode.externalApplication),
+                      child: const Text('Terms', style: TextStyle(color: Color(0xFF52525B), fontSize: 12)),
+                    ),
+                    const Text(' · ', style: TextStyle(color: Color(0xFF52525B), fontSize: 12)),
+                    TextButton(
+                      onPressed: () => launchUrl(Uri.parse('$_relayUrl/privacy'), mode: LaunchMode.externalApplication),
+                      child: const Text('Privacy', style: TextStyle(color: Color(0xFF52525B), fontSize: 12)),
+                    ),
+                  ],
+                ),
               ],
             ),
     );

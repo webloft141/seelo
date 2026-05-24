@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -180,6 +181,21 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     child: const Text('Forgot password?', style: TextStyle(color: Color(0xFF888888), fontSize: 13)),
                   ),
                 ],
+                const SizedBox(height: 32),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: () => _openUrl('https://seelo-relay.onrender.com/terms'),
+                      child: const Text('Terms', style: TextStyle(color: Color(0xFF666666), fontSize: 12)),
+                    ),
+                    const Text('·', style: TextStyle(color: Color(0xFF444444), fontSize: 12)),
+                    TextButton(
+                      onPressed: () => _openUrl('https://seelo-relay.onrender.com/privacy'),
+                      child: const Text('Privacy', style: TextStyle(color: Color(0xFF666666), fontSize: 12)),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -187,6 +203,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ),
     );
   }
+
+  void _openUrl(String url) => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
 
   InputDecoration _input(String label) => InputDecoration(
     labelText: label,
