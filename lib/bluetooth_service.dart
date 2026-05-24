@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+enum BleState { initial, unavailable, permissionDenied, bluetoothOff, scanning, idle, error }
+
 class SeeloBLEDevice {
   final String deviceId;
   final String name;
@@ -27,44 +29,69 @@ class SeeloBLEDevice {
   };
 }
 
-class BluetoothService {
+class SeeloBleService {
   static const int _seeloCompanyId = 0xFFFF;
   static const String _seeloNamePrefix = 'Seelo';
 
   final _devices = <String, SeeloBLEDevice>{};
   final _deviceController = StreamController<List<SeeloBLEDevice>>.broadcast();
+  final _stateController = StreamController<BleState>.broadcast();
   StreamSubscription<List<ScanResult>>? _scanSub;
-  bool _isScanning = false;
+  BleState _state = BleState.initial;
 
   Stream<List<SeeloBLEDevice>> get discoveredDevices => _deviceController.stream;
-  bool get isScanning => _isScanning;
+  Stream<BleState> get stateStream => _stateController.stream;
+  BleState get state => _state;
+  bool get isScanning => _state == BleState.scanning;
 
-  Future<bool> get isBluetoothAvailable async {
-    try {
-      return await FlutterBluePlus.isSupported;
-    } catch (_) {
-      return false;
+  SeeloBleService() {
+    FlutterBluePlus.adapterState.listen((s) {
+      if (s == BluetoothAdapterState.off) {
+        _updateState(BleState.bluetoothOff);
+      } else if (s == BluetoothAdapterState.on && _state == BleState.bluetoothOff) {
+        _updateState(BleState.idle);
+      }
+    });
+  }
+
+  void _updateState(BleState s) {
+    _state = s;
+    if (!_stateController.isClosed) {
+      _stateController.add(s);
     }
   }
 
-  Future<bool> get isBluetoothOn async {
+  Future<BleState> checkAvailability() async {
     try {
-      final state = await FlutterBluePlus.adapterState.first;
-      return state == BluetoothAdapterState.on;
+      if (!await FlutterBluePlus.isSupported) {
+        _updateState(BleState.unavailable);
+        return BleState.unavailable;
+      }
+
+      final adapterState = await FlutterBluePlus.adapterState.first;
+      if (adapterState != BluetoothAdapterState.on) {
+        _updateState(BleState.bluetoothOff);
+        return BleState.bluetoothOff;
+      }
+
+      _updateState(BleState.idle);
+      return BleState.idle;
     } catch (_) {
-      return false;
+      _updateState(BleState.error);
+      return BleState.error;
     }
   }
 
-  Future<void> startScan({Duration timeout = const Duration(seconds: 15)}) async {
-    if (_isScanning) return;
-    _isScanning = true;
+  Future<String> startScan({Duration timeout = const Duration(seconds: 15)}) async {
+    if (_state == BleState.scanning) return '';
     _devices.clear();
+    _updateState(BleState.scanning);
 
     try {
-      final state = await FlutterBluePlus.adapterState.first;
-      if (state != BluetoothAdapterState.on) {
-        await FlutterBluePlus.turnOn();
+      final adapterState = await FlutterBluePlus.adapterState.first;
+      if (adapterState != BluetoothAdapterState.on) {
+        _updateState(BleState.bluetoothOff);
+        return 'Turn on Bluetooth to scan for devices';
       }
 
       await FlutterBluePlus.startScan(
@@ -78,8 +105,22 @@ class BluetoothService {
         }
         _deviceController.add(_devices.values.toList());
       });
-    } catch (_) {
-      _isScanning = false;
+
+      return '';
+    } on FlutterBluePlusException catch (e) {
+      final msg = e.description ?? '';
+      if (msg.toLowerCase().contains('permission') || msg.toLowerCase().contains('denied') || msg.toLowerCase().contains('not granted')) {
+        _updateState(BleState.permissionDenied);
+        if (msg.contains('nearby')) {
+          return 'Bluetooth permission denied. Go to Settings > Apps > Seelo > Permissions and grant "Nearby devices".';
+        }
+        return 'Bluetooth permission denied. Please grant Bluetooth access in Settings.';
+      }
+      _updateState(BleState.error);
+      return 'Bluetooth scan failed: ${e.description ?? 'Unknown error'}';
+    } catch (e) {
+      _updateState(BleState.error);
+      return 'Bluetooth error: $e';
     }
   }
 
@@ -120,7 +161,9 @@ class BluetoothService {
   }
 
   Future<void> stopScan() async {
-    _isScanning = false;
+    if (_state == BleState.scanning) {
+      _updateState(BleState.idle);
+    }
     await _scanSub?.cancel();
     _scanSub = null;
     try {
@@ -131,5 +174,6 @@ class BluetoothService {
   void dispose() {
     stopScan();
     _deviceController.close();
+    _stateController.close();
   }
 }
