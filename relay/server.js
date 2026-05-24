@@ -314,9 +314,10 @@ io.on('connection', (socket) => {
 
       // Check viewer limit
       const currentViewers = session.viewers.length;
-      if (currentViewers >= session.maxViewers) {
+      const maxAllowed = session.maxViewers > 0 ? session.maxViewers : 1;
+      if (currentViewers >= maxAllowed) {
         // Free plan (maxViewers=1): swap mode — replace old viewer
-        if (session.maxViewers === 1 && currentViewers === 1) {
+        if (maxAllowed === 1 && currentViewers === 1) {
           const oldSocketId = session.viewers[0];
           const oldSocket = io.sockets.sockets.get(oldSocketId);
           if (oldSocket) {
@@ -325,7 +326,7 @@ io.on('connection', (socket) => {
           }
           session.viewers = [socket.id];
         } else {
-          socket.emit('room-full', { message: 'Device limit reached', max: session.maxViewers, current: currentViewers });
+          socket.emit('room-full', { message: 'Device limit reached', max: maxAllowed, current: currentViewers });
           return;
         }
       }
@@ -356,7 +357,7 @@ io.on('connection', (socket) => {
     if (!checkSocketRate(socket, 'cloud-design', 10)) return;
     const sessionId = socket.data.sessionId;
     if (!sessionId || !data) return;
-    if (!sessions[sessionId]) sessions[sessionId] = {};
+    if (!sessions[sessionId]) sessions[sessionId] = { maxViewers: 1, viewers: [], design: null };
     sessions[sessionId].design = data;
     socket.to(sessionId).emit('cloud-design', data);
     const uid = socket.data.uid;
