@@ -38,6 +38,9 @@
         .spinner { width: 40px; height: 40px; border: 3px solid rgba(99, 102, 241, 0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s infinite linear; }
         .loader-text { font-size: 14px; color: #94a3b8; font-weight: 600; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .footer { position: absolute; bottom: 16px; font-size: 12px; color: #475569; z-index: 1; }
+        .footer a { color: #475569; text-decoration: none; margin: 0 8px; }
+        .footer a:hover { color: var(--accent); }
     </style>
 </head>
 <body>
@@ -116,5 +119,6 @@
             });
         }
     </script>
+    <div class="footer"><a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a></div>
 </body>
 </html>

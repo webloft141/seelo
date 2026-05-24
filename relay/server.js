@@ -84,6 +84,12 @@ app.get('/viewer.html', (req, res) => {
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'viewer.html'));
 });
+app.get('/terms', (req, res) => {
+  res.sendFile(path.join(__dirname, 'terms.html'));
+});
+app.get('/privacy', (req, res) => {
+  res.sendFile(path.join(__dirname, 'privacy.html'));
+});
 
 // --- Subscription API ---
 
