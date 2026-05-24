@@ -369,13 +369,19 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const sessionId = socket.data.sessionId;
     if (sessionId) {
-      const room = io.sockets.adapter.rooms.get(sessionId);
-      const viewerCount = room ? room.size - (sessions[sessionId]?.plugin ? 1 : 0) : 0;
-      if (viewerCount <= 0 && sessions[sessionId]) {
-        delete sessions[sessionId];
-      } else {
-        if (sessions[sessionId]) {
-          sessions[sessionId].viewers = [];
+      const session = sessions[sessionId];
+      if (session) {
+        const wasPlugin = socket.data.role === 'plugin';
+        if (wasPlugin) {
+          session.plugin = null;
+        } else {
+          session.viewers = session.viewers.filter(id => id !== socket.id);
+        }
+        const room = io.sockets.adapter.rooms.get(sessionId);
+        const viewerCount = room ? room.size - (session.plugin ? 1 : 0) : 0;
+        if (viewerCount <= 0 && !session.plugin) {
+          delete sessions[sessionId];
+        } else {
           io.to(sessionId).emit('viewer-count', viewerCount);
         }
       }

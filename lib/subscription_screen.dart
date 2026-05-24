@@ -156,6 +156,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     return '1 device';
   }
 
+  int _planMaxViewers(String planId) {
+    if (planId.contains('team')) return 999;
+    if (planId.contains('pro')) return 5;
+    return 1;
+  }
+
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -219,7 +225,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   const SizedBox(height: 8),
                   _featureButton(Icons.analytics, 'Analytics', () => Navigator.push(context, MaterialPageRoute(builder: (_) => AnalyticsScreen(plan: _currentPlan)))),
                   const SizedBox(height: 8),
-                  _featureButton(Icons.devices, 'Device Manager', () => Navigator.push(context, MaterialPageRoute(builder: (_) => DeviceManagerScreen(isPro: _isOnPaidPlan, currentViewers: 0, maxViewers: _planDeviceCount(_currentPlan) == 'Unlimited' ? 999 : int.tryParse(_planDeviceCount(_currentPlan).split(' ').first) ?? 1)))),
+                  _featureButton(Icons.devices, 'Device Manager', () => Navigator.push(context, MaterialPageRoute(builder: (_) => DeviceManagerScreen(isPro: _isOnPaidPlan, currentViewers: 0, maxViewers: _planMaxViewers(_currentPlan))))),
                 ] else ...[
                   const SizedBox(height: 20),
                   Container(
