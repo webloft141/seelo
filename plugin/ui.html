@@ -378,9 +378,7 @@
                 avatar.innerHTML = '<span style="font-size:11px;font-weight:700;">' + initial + '</span>';
                 avatar.title = currentUser.email || 'User';
                 avatar.style.cursor = 'pointer';
-                avatar.onclick = () => {
-                    if (confirm('Sign out ' + (currentUser.email || '') + '?')) logout();
-                };
+                avatar.onclick = () => showSignOut();
             } else {
                 avatar.innerHTML = '<span style="font-size:14px;">👤</span>';
                 avatar.title = 'Sign in';
@@ -388,6 +386,29 @@
                 avatar.onclick = () => showAuth('login');
             }
             fitHeight();
+        }
+
+        function showSignOut() {
+            const overlay = document.getElementById('auth-overlay');
+            overlay.classList.remove('hidden');
+            const formContent = document.querySelector('#auth-overlay > div > div:first-child');
+            const signoutEl = document.createElement('div');
+            signoutEl.id = 'signout-box';
+            signoutEl.style.cssText = 'margin-bottom:12px;';
+            signoutEl.innerHTML = '<p style="font-size:13px;color:var(--text);margin-bottom:12px;">Sign out <strong>' + (currentUser.email || '') + '</strong>?</p>'
+                + '<button class="btn-p" onclick="logout();hideAuth();removeSignOutBox();" style="margin-bottom:6px;">Sign Out</button>'
+                + '<button class="btn-s" onclick="hideAuth();removeSignOutBox();">Cancel</button>';
+            if (formContent) formContent.style.display = 'none';
+            document.querySelector('#auth-overlay > div').appendChild(signoutEl);
+            document.getElementById('auth-title').innerText = 'Sign Out';
+        }
+
+        function removeSignOutBox() {
+            const el = document.getElementById('signout-box');
+            if (el) el.remove();
+            const formContent = document.querySelector('#auth-overlay > div > div:first-child');
+            if (formContent) formContent.style.display = '';
+            document.getElementById('auth-title').innerText = 'Sign In';
         }
 
         function updatePlanBadge() {
@@ -764,6 +785,20 @@
 
         function copyShareLink() {
             const input = document.getElementById('share-link');
+            const text = input.value;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    document.getElementById('footer-status').innerText = 'Link copied!';
+                    setTimeout(() => { document.getElementById('footer-status').innerText = 'Ready'; }, 2000);
+                }).catch(() => fallbackCopy(text));
+            } else {
+                fallbackCopy(text);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const input = document.getElementById('share-link');
+            input.value = text;
             input.select();
             try {
                 document.execCommand('copy');
