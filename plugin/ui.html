@@ -469,8 +469,8 @@
                     transports: ['websocket'],
                     reconnection: true,
                     reconnectionAttempts: Infinity,
-                    reconnectionDelay: 2000,
-                    reconnectionDelayMax: 10000,
+                    reconnectionDelay: 5000,
+                    reconnectionDelayMax: 30000,
                     timeout: 15000
                 });
             } catch(e) {
@@ -614,9 +614,17 @@
             if (mode === 'local') {
                 document.getElementById('local-section').classList.remove('hidden');
                 document.getElementById('cloud-section').classList.add('hidden');
+                if (cloudSocket) { try { cloudSocket.disconnect(); } catch(e) {} }
+                if (!desktopSocket || !desktopSocket.connected) {
+                    setupDesktopSocket();
+                }
             } else {
                 document.getElementById('local-section').classList.add('hidden');
                 document.getElementById('cloud-section').classList.remove('hidden');
+                if (desktopSocket) { try { desktopSocket.disconnect(); } catch(e) {} }
+                desktopConnected = false;
+                setDot($('dot-desktop'), 'red');
+                $('lbl-desktop').innerText = 'Desktop offline';
             }
             document.getElementById('lbl-mode-indicator').innerText = mode.charAt(0).toUpperCase() + mode.slice(1);
             setTimeout(fitHeight, 50);
@@ -658,8 +666,18 @@
                 return;
             }
             if (cloudSocket) { try { cloudSocket.disconnect(); } catch(e) {} }
+            // Pre-warm Render to avoid cold-start WebSocket rejection
+            setCloudStatus('Waking relay...', '');
+            fetch(relayUrl + '/api/health', { mode: 'no-cors' }).catch(() => {});
             try {
-                cloudSocket = io(relayUrl, { transports: ['websocket', 'polling'], timeout: 15000 });
+                cloudSocket = io(relayUrl, {
+                    transports: ['websocket', 'polling'],
+                    timeout: 30000,
+                    reconnection: true,
+                    reconnectionAttempts: Infinity,
+                    reconnectionDelay: 5000,
+                    reconnectionDelayMax: 30000,
+                });
             } catch(e) {
                 setCloudStatus('Relay error');
                 return;
@@ -702,7 +720,10 @@
             cloudSocket.on('disconnect', () => {
                 setCloudStatus('Disconnected');
                 cloudDataReceived = false;
-                // Auto-retry sync on reconnect
+                if (cloudHeartbeat) {
+                    clearInterval(cloudHeartbeat);
+                    cloudHeartbeat = null;
+                }
             });
             cloudSocket.on('connect_error', () => {
                 setCloudStatus('Relay offline');
