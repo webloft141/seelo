@@ -6,6 +6,7 @@ use tauri::{Emitter, Manager};
 use tokio::sync::RwLock;
 use qrcode::{render::svg, QrCode};
 use tauri_plugin_autostart::MacosLauncher;
+mod ble_advertiser;
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct MobileInfo {
@@ -593,6 +594,19 @@ async fn main() {
                 {
                     let mut s2 = st.write().await;
                     s2.server_port = addr.port();
+                    let server_port = s2.server_port;
+                    let secret = s2.room_secret.clone().unwrap_or_default();
+                    drop(s2);
+
+                    // Start BLE advertising (best-effort)
+                    let local_ip = get_local_ip();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        match ble_advertiser::start(server_port, &local_ip, &secret) {
+                            Ok(()) => eprintln!("BLE advertiser started"),
+                            Err(e) => eprintln!("BLE advertiser: {e} (non-critical)"),
+                        }
+                    });
                 }
                 eprintln!("Socket.io server listening on http://{}", addr);
                 if let Err(e) = axum::serve(listener, (*r).clone()).await {

@@ -17,6 +17,7 @@ import 'premium.dart';
 import 'device_manager_screen.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter/services.dart';
+import 'bluetooth_discovery_screen.dart';
 
 enum ConnectionQuality { disconnected, poor, fair, good }
 
@@ -1183,6 +1184,27 @@ class _HomeScreenState extends State<HomeScreen> {
         });
   }
 
+  void _bluetoothDiscover() {
+    Navigator.of(context)
+        .push<Map<String, dynamic>>(
+          MaterialPageRoute(builder: (_) => const BluetoothDiscoveryScreen()),
+        )
+        .then((payload) {
+          if (!mounted || payload == null) return;
+          setState(() => _error = '');
+          widget.controller.connectWithPayload(
+            payload: payload,
+            onConnected: _openPreview,
+            onError: (msg) {
+              if (mounted) setState(() => _error = msg);
+            },
+            onStatus: (msg) {
+              if (mounted) setState(() => _status = msg);
+            },
+          );
+        });
+  }
+
   void _manualConnect() {
     final text = _linkController.text.trim();
     if (text.isEmpty) return;
@@ -1354,6 +1376,23 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: _scanAndConnect,
                       icon: const Icon(Icons.qr_code_scanner),
                       label: const Text('Open QR Scanner'),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Color(0xFF6366F1)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: _bluetoothDiscover,
+                      icon: const Icon(Icons.bluetooth, size: 20),
+                      label: const Text('Discover via Bluetooth'),
                     ),
                   ),
                   const SizedBox(height: 10),
