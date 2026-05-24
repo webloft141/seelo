@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'premium.dart';
+import 'device_manager_screen.dart';
+import 'team_workspace_screen.dart';
+import 'analytics_screen.dart';
 
 const _relayUrl = 'https://seelo-relay.onrender.com';
 
@@ -208,6 +211,33 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 const Text('Feature Comparison', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 12),
                 _buildComparisonTable(),
+                if (_currentPlan.contains('team')) ...[
+                  const SizedBox(height: 20),
+                  const Text('Team Features', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 12),
+                  _featureButton(Icons.group, 'Team Workspace', () => Navigator.push(context, MaterialPageRoute(builder: (_) => TeamWorkspaceScreen(plan: _currentPlan)))),
+                  const SizedBox(height: 8),
+                  _featureButton(Icons.analytics, 'Analytics', () => Navigator.push(context, MaterialPageRoute(builder: (_) => AnalyticsScreen(plan: _currentPlan)))),
+                  const SizedBox(height: 8),
+                  _featureButton(Icons.devices, 'Device Manager', () => Navigator.push(context, MaterialPageRoute(builder: (_) => DeviceManagerScreen(isPro: _isOnPaidPlan, currentViewers: 0, maxViewers: _planDeviceCount(_currentPlan) == 'Unlimited' ? 999 : int.tryParse(_planDeviceCount(_currentPlan).split(' ').first) ?? 1)))),
+                ] else ...[
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0C0D12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF1E1F28)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.devices, color: const Color(0xFF6366F1), size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text('Multi-device, Team Workspace, Analytics & Device Manager are available on Pro/Team', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12))),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
     );
@@ -533,6 +563,33 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     if (val == true) return '✓';
     if (val == false) return '—';
     return val.toString();
+  }
+
+  Widget _featureButton(IconData icon, String label, VoidCallback onTap) {
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          backgroundColor: const Color(0xFF0C0D12),
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: const BorderSide(color: Color(0xFF1E1F28)),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: const Color(0xFF22C55E)),
+            const SizedBox(width: 10),
+            Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            const Icon(Icons.chevron_right, size: 18, color: Color(0xFF64748B)),
+          ],
+        ),
+      ),
+    );
   }
 
   String _formatDate(String iso) {

@@ -160,6 +160,14 @@ function getPlans() {
   }));
 }
 
+function incrementUserStat(uid, stat) {
+  const user = getUser(uid);
+  if (!user.stats) user.stats = { totalSessions: 0, totalPreviews: 0 };
+  if (stat === 'totalSessions') user.stats.totalSessions = (user.stats.totalSessions || 0) + 1;
+  if (stat === 'totalPreviews') user.stats.totalPreviews = (user.stats.totalPreviews || 0) + 1;
+  save();
+}
+
 function _raw() { return data; }
 
 // Immediate synchronous write (for graceful shutdown)
@@ -177,5 +185,6 @@ module.exports = {
   cancelPlan,
   addLicenseKey, listLicenseKeys, activateKey, exportKeysCSV,
   getPlans, plans,
+  incrementUserStat,
   _raw, forceSave,
 };

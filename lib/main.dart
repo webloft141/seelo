@@ -2,18 +2,20 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
-
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:share_plus/share_plus.dart';
 import 'auth_screen.dart';
 import 'subscription_screen.dart';
 import 'premium.dart';
+import 'device_manager_screen.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter/services.dart';
 
@@ -38,8 +40,10 @@ class SavedDevice {
 
   String get displayLabel => label.isNotEmpty ? label : '$ip:$port';
   Map<String, dynamic> toPayload() => {
-    'ip': ip, 'port': port.toString(),
-    'roomId': roomId, 'roomSecret': roomSecret,
+    'ip': ip,
+    'port': port.toString(),
+    'roomId': roomId,
+    'roomSecret': roomSecret,
   };
 }
 
@@ -92,7 +96,9 @@ class _SeeloAppState extends State<SeeloApp> {
   void initState() {
     super.initState();
     try {
-      _authSub = AuthService().authState.listen((u) => setState(() => _user = u));
+      _authSub = AuthService().authState.listen(
+        (u) => setState(() => _user = u),
+      );
       _firebaseReady = true;
     } catch (_) {}
   }
@@ -108,7 +114,9 @@ class _SeeloAppState extends State<SeeloApp> {
     return MaterialApp(
       title: 'Seelo',
       debugShowCheckedModeBanner: false,
-      home: _firebaseReady ? (_user != null ? const SplashScreen() : const AuthScreen()) : const SplashScreen(),
+      home: _firebaseReady
+          ? (_user != null ? const SplashScreen() : const AuthScreen())
+          : const SplashScreen(),
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFF0C0C0C),
         appBarTheme: const AppBarTheme(
@@ -165,7 +173,16 @@ class DesignIssue {
   final String suggestion;
   final double x, y, width, height;
   final String? layerName;
-  DesignIssue({required this.type, required this.message, this.suggestion = '', required this.x, required this.y, required this.width, required this.height, this.layerName});
+  DesignIssue({
+    required this.type,
+    required this.message,
+    this.suggestion = '',
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    this.layerName,
+  });
 }
 
 class DevicePreset {
@@ -183,22 +200,95 @@ class DevicePreset {
     this.exportScale = 3.0,
   });
 
-  String get label => '$name (${screenWidth.toInt()}\u00D7${screenHeight.toInt()})';
+  String get label =>
+      '$name (${screenWidth.toInt()}\u00D7${screenHeight.toInt()})';
 }
 
 const builtInPresets = [
-  DevicePreset(name: 'iPhone 15 Pro Max', screenWidth: 430, screenHeight: 932, dpr: 3.0, exportScale: 3.0),
-  DevicePreset(name: 'iPhone 15 Pro', screenWidth: 393, screenHeight: 852, dpr: 3.0, exportScale: 3.0),
-  DevicePreset(name: 'iPhone 15', screenWidth: 393, screenHeight: 852, dpr: 2.94, exportScale: 3.0),
-  DevicePreset(name: 'iPhone SE', screenWidth: 375, screenHeight: 667, dpr: 2.0, exportScale: 2.0),
-  DevicePreset(name: 'Pixel 8 Pro', screenWidth: 412, screenHeight: 915, dpr: 3.5, exportScale: 3.0),
-  DevicePreset(name: 'Pixel 8', screenWidth: 392, screenHeight: 852, dpr: 2.63, exportScale: 3.0),
-  DevicePreset(name: 'Galaxy S24', screenWidth: 412, screenHeight: 915, dpr: 3.0, exportScale: 3.0),
-  DevicePreset(name: 'Galaxy S24 Ultra', screenWidth: 412, screenHeight: 915, dpr: 3.69, exportScale: 3.0),
-  DevicePreset(name: 'iPad Pro 12.9"', screenWidth: 1024, screenHeight: 1366, dpr: 2.0, exportScale: 2.0),
-  DevicePreset(name: 'iPad Air 11"', screenWidth: 820, screenHeight: 1180, dpr: 2.0, exportScale: 2.0),
-  DevicePreset(name: 'Desktop HD', screenWidth: 1440, screenHeight: 900, dpr: 1.0, exportScale: 1.0),
-  DevicePreset(name: 'Desktop FHD', screenWidth: 1920, screenHeight: 1080, dpr: 1.0, exportScale: 1.0),
+  DevicePreset(
+    name: 'iPhone 15 Pro Max',
+    screenWidth: 430,
+    screenHeight: 932,
+    dpr: 3.0,
+    exportScale: 3.0,
+  ),
+  DevicePreset(
+    name: 'iPhone 15 Pro',
+    screenWidth: 393,
+    screenHeight: 852,
+    dpr: 3.0,
+    exportScale: 3.0,
+  ),
+  DevicePreset(
+    name: 'iPhone 15',
+    screenWidth: 393,
+    screenHeight: 852,
+    dpr: 2.94,
+    exportScale: 3.0,
+  ),
+  DevicePreset(
+    name: 'iPhone SE',
+    screenWidth: 375,
+    screenHeight: 667,
+    dpr: 2.0,
+    exportScale: 2.0,
+  ),
+  DevicePreset(
+    name: 'Pixel 8 Pro',
+    screenWidth: 412,
+    screenHeight: 915,
+    dpr: 3.5,
+    exportScale: 3.0,
+  ),
+  DevicePreset(
+    name: 'Pixel 8',
+    screenWidth: 392,
+    screenHeight: 852,
+    dpr: 2.63,
+    exportScale: 3.0,
+  ),
+  DevicePreset(
+    name: 'Galaxy S24',
+    screenWidth: 412,
+    screenHeight: 915,
+    dpr: 3.0,
+    exportScale: 3.0,
+  ),
+  DevicePreset(
+    name: 'Galaxy S24 Ultra',
+    screenWidth: 412,
+    screenHeight: 915,
+    dpr: 3.69,
+    exportScale: 3.0,
+  ),
+  DevicePreset(
+    name: 'iPad Pro 12.9"',
+    screenWidth: 1024,
+    screenHeight: 1366,
+    dpr: 2.0,
+    exportScale: 2.0,
+  ),
+  DevicePreset(
+    name: 'iPad Air 11"',
+    screenWidth: 820,
+    screenHeight: 1180,
+    dpr: 2.0,
+    exportScale: 2.0,
+  ),
+  DevicePreset(
+    name: 'Desktop HD',
+    screenWidth: 1440,
+    screenHeight: 900,
+    dpr: 1.0,
+    exportScale: 1.0,
+  ),
+  DevicePreset(
+    name: 'Desktop FHD',
+    screenWidth: 1920,
+    screenHeight: 1080,
+    dpr: 1.0,
+    exportScale: 1.0,
+  ),
 ];
 
 class SessionEntry {
@@ -223,8 +313,11 @@ class SeeloConnectionController {
   String? _lastFrameId;
 
   final ValueNotifier<int> imageVersion = ValueNotifier<int>(0);
-  final ValueNotifier<FrameMetadata?> metadataNotifier = ValueNotifier<FrameMetadata?>(null);
-  final ValueNotifier<ConnectionQuality> connectionQuality = ValueNotifier(ConnectionQuality.disconnected);
+  final ValueNotifier<FrameMetadata?> metadataNotifier =
+      ValueNotifier<FrameMetadata?>(null);
+  final ValueNotifier<ConnectionQuality> connectionQuality = ValueNotifier(
+    ConnectionQuality.disconnected,
+  );
   final ValueNotifier<int> latencyMs = ValueNotifier(0);
   final ValueNotifier<List<SavedDevice>> savedDevices = ValueNotifier([]);
   final ValueNotifier<List<DesignIssue>> issues = ValueNotifier([]);
@@ -245,7 +338,16 @@ class SeeloConnectionController {
   void _saveDevice(String ip, int port) {
     final devices = List<SavedDevice>.from(savedDevices.value);
     devices.removeWhere((d) => d.ip == ip && d.port == port);
-    devices.insert(0, SavedDevice(ip: ip, port: port, roomId: roomId, roomSecret: roomSecret, lastUsed: DateTime.now()));
+    devices.insert(
+      0,
+      SavedDevice(
+        ip: ip,
+        port: port,
+        roomId: roomId,
+        roomSecret: roomSecret,
+        lastUsed: DateTime.now(),
+      ),
+    );
     if (devices.length > _maxSavedDevices) devices.removeLast();
     savedDevices.value = devices;
   }
@@ -266,11 +368,27 @@ class SeeloConnectionController {
 
   bool get isConnected => _socket?.connected == true;
 
-  void connectWithPayload({required Map<String, dynamic> payload, VoidCallback? onConnected, void Function(String message)? onError, void Function(String message)? onStatus}) {
-    _connectWithPayloadInternal(payload, onConnected: onConnected, onError: onError, onStatus: onStatus);
+  void connectWithPayload({
+    required Map<String, dynamic> payload,
+    VoidCallback? onConnected,
+    void Function(String message)? onError,
+    void Function(String message)? onStatus,
+  }) {
+    _connectWithPayloadInternal(
+      payload,
+      onConnected: onConnected,
+      onError: onError,
+      onStatus: onStatus,
+    );
   }
 
-  void _connectToRelay(String relayUrl, String sessionId, {VoidCallback? onConnected, void Function(String message)? onError, void Function(String message)? onStatus}) {
+  void _connectToRelay(
+    String relayUrl,
+    String sessionId, {
+    VoidCallback? onConnected,
+    void Function(String message)? onError,
+    void Function(String message)? onStatus,
+  }) {
     lastError.value = null;
     if (relayUrl.isEmpty || sessionId.isEmpty) {
       onError?.call('Invalid relay link');
@@ -289,12 +407,12 @@ class SeeloConnectionController {
     final socket = io.io(
       relayUrl,
       io.OptionBuilder()
-          .setTransports(['websocket'])
+          .setTransports(['websocket', 'polling'])
           .enableReconnection()
           .setReconnectionAttempts(config.reconnectAttempts)
           .setReconnectionDelay(config.reconnectDelay)
           .setReconnectionDelayMax(3000)
-          .setTimeout(config.connectTimeout)
+          .setTimeout(20000)
           .build(),
     );
     _socket = socket;
@@ -305,8 +423,18 @@ class SeeloConnectionController {
       _reconnectCount = 0;
       connectionQuality.value = ConnectionQuality.good;
       viewerCount.value = 0;
-      sessionHistory.insert(0, SessionEntry('Cloud: ${sessionId.length > 8 ? sessionId.substring(0, 8) : sessionId}...', DateTime.now(), isCloud: true));
-      final payload = <String, dynamic>{'sessionId': sessionId, 'role': 'viewer'};
+      sessionHistory.insert(
+        0,
+        SessionEntry(
+          'Cloud: ${sessionId.length > 8 ? sessionId.substring(0, 8) : sessionId}...',
+          DateTime.now(),
+          isCloud: true,
+        ),
+      );
+      final payload = <String, dynamic>{
+        'sessionId': sessionId,
+        'role': 'viewer',
+      };
       try {
         final user = FirebaseAuth.instance.currentUser;
         if (user != null) {
@@ -338,8 +466,20 @@ class SeeloConnectionController {
               frameHeight: (design['height'] ?? 0).toDouble(),
               exportScale: (design['exportScale'] ?? 2).toDouble(),
               backgroundColor: design['backgroundColor']?.toString(),
-              textLayers: (design['textLayers'] is List ? List<Map<String, dynamic>>.from(design['textLayers'].map((e) => Map<String, dynamic>.from(e))) : []),
-              videoLayers: (design['videoLayers'] is List ? List<Map<String, dynamic>>.from(design['videoLayers'].map((e) => Map<String, dynamic>.from(e))) : []),
+              textLayers: (design['textLayers'] is List
+                  ? List<Map<String, dynamic>>.from(
+                      design['textLayers'].map(
+                        (e) => Map<String, dynamic>.from(e),
+                      ),
+                    )
+                  : []),
+              videoLayers: (design['videoLayers'] is List
+                  ? List<Map<String, dynamic>>.from(
+                      design['videoLayers'].map(
+                        (e) => Map<String, dynamic>.from(e),
+                      ),
+                    )
+                  : []),
               imageData: imageData,
             );
             metadataNotifier.value = currentMetadata;
@@ -370,7 +510,9 @@ class SeeloConnectionController {
 
     socket.on('device-replaced', (data) {
       if (_disposed) return;
-      final msg = data is Map ? (data['message'] ?? 'Connected from another device') : 'Connected from another device';
+      final msg = data is Map
+          ? (data['message'] ?? 'Connected from another device')
+          : 'Connected from another device';
       lastError.value = msg;
       onError?.call(msg);
       onStatus?.call('Replaced by new device');
@@ -394,8 +536,9 @@ class SeeloConnectionController {
       connecting = false;
       _reconnectCount++;
       connectionQuality.value = ConnectionQuality.poor;
-      onError?.call('Connection failed ($_reconnectCount)');
-      onStatus?.call('Retrying...');
+      debugPrint('Seelo cloud connectError: $err');
+      onError?.call('Cloud connection error: $err');
+      onStatus?.call('Retrying ($_reconnectCount)');
     });
 
     socket.onDisconnect((_) {
@@ -404,11 +547,20 @@ class SeeloConnectionController {
       onStatus?.call('Disconnected');
     });
 
-    socket.onReconnect((_) {
+    socket.onReconnect((_) async {
       if (_disposed) return;
       connectionQuality.value = ConnectionQuality.good;
-      final payload = <String, dynamic>{'sessionId': sessionId, 'role': 'viewer'};
-      FirebaseAuth.instance.currentUser?.uid;
+      final payload = <String, dynamic>{
+        'sessionId': sessionId,
+        'role': 'viewer',
+      };
+      try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          payload['uid'] = user.uid;
+          payload['idToken'] = await user.getIdToken();
+        }
+      } catch (_) {}
       socket.emit('join-session', payload);
       onStatus?.call('Reconnected');
     });
@@ -423,14 +575,29 @@ class SeeloConnectionController {
     });
   }
 
-  void _connectWithPayloadInternal(Map<String, dynamic> payload, {VoidCallback? onConnected, void Function(String message)? onError, void Function(String message)? onStatus}) {
+  void _connectWithPayloadInternal(
+    Map<String, dynamic> payload, {
+    VoidCallback? onConnected,
+    void Function(String message)? onError,
+    void Function(String message)? onStatus,
+  }) {
     final relay = (payload['relay'] ?? '').toString().trim();
     if (relay.isNotEmpty) {
-      _connectToRelay(relay, (payload['sessionId'] ?? '').toString(), onConnected: onConnected, onError: onError, onStatus: onStatus);
+      _connectToRelay(
+        relay,
+        (payload['sessionId'] ?? '').toString(),
+        onConnected: onConnected,
+        onError: onError,
+        onStatus: onStatus,
+      );
       return;
     }
     final ip = (payload['ip'] ?? '').toString().trim();
-    final port = int.tryParse((payload['port'] ?? SeeloConfig().defaultPort).toString()) ?? SeeloConfig().defaultPort;
+    final port =
+        int.tryParse(
+          (payload['port'] ?? SeeloConfig().defaultPort).toString(),
+        ) ??
+        SeeloConfig().defaultPort;
     roomId = (payload['roomId'] ?? SeeloConfig().defaultRoomId).toString();
     roomSecret = payload['roomSecret']?.toString();
 
@@ -452,7 +619,7 @@ class SeeloConnectionController {
     final socket = io.io(
       'http://$ip:$port',
       io.OptionBuilder()
-          .setTransports(['websocket']) 
+          .setTransports(['websocket'])
           .enableReconnection()
           .setReconnectionAttempts(config.reconnectAttempts)
           .setReconnectionDelay(config.reconnectDelay)
@@ -482,7 +649,10 @@ class SeeloConnectionController {
       _latencySamples = 0;
       connectionQuality.value = ConnectionQuality.good;
       _saveDevice(ip, port);
-      sessionHistory.insert(0, SessionEntry('Desktop: $ip:$port', DateTime.now()));
+      sessionHistory.insert(
+        0,
+        SessionEntry('Desktop: $ip:$port', DateTime.now()),
+      );
       await joinAndRequestSync();
       _startPing();
       onConnected?.call();
@@ -498,7 +668,10 @@ class SeeloConnectionController {
           final imageData = design['imageData'];
           final newId = design['id']?.toString();
           // Frame dedup: skip re-render if same frame ID
-          if (newId != null && newId == _lastFrameId && imageData != null && imageData == currentImageData) {
+          if (newId != null &&
+              newId == _lastFrameId &&
+              imageData != null &&
+              imageData == currentImageData) {
             return;
           }
           if (imageData is String && imageData.startsWith('data:image')) {
@@ -513,8 +686,20 @@ class SeeloConnectionController {
               frameHeight: (design['height'] ?? 0).toDouble(),
               exportScale: (design['exportScale'] ?? 2).toDouble(),
               backgroundColor: design['backgroundColor']?.toString(),
-              textLayers: (design['textLayers'] is List ? List<Map<String, dynamic>>.from(design['textLayers'].map((e) => Map<String, dynamic>.from(e))) : []),
-              videoLayers: (design['videoLayers'] is List ? List<Map<String, dynamic>>.from(design['videoLayers'].map((e) => Map<String, dynamic>.from(e))) : []),
+              textLayers: (design['textLayers'] is List
+                  ? List<Map<String, dynamic>>.from(
+                      design['textLayers'].map(
+                        (e) => Map<String, dynamic>.from(e),
+                      ),
+                    )
+                  : []),
+              videoLayers: (design['videoLayers'] is List
+                  ? List<Map<String, dynamic>>.from(
+                      design['videoLayers'].map(
+                        (e) => Map<String, dynamic>.from(e),
+                      ),
+                    )
+                  : []),
               imageData: imageData,
             );
             metadataNotifier.value = currentMetadata;
@@ -529,7 +714,9 @@ class SeeloConnectionController {
 
     socket.on('error-msg', (payload) {
       if (_disposed) return;
-      final msg = payload is Map ? (payload['message'] ?? 'Server error').toString() : 'Server error';
+      final msg = payload is Map
+          ? (payload['message'] ?? 'Server error').toString()
+          : 'Server error';
       onError?.call(msg);
     });
 
@@ -544,8 +731,9 @@ class SeeloConnectionController {
       connecting = false;
       _reconnectCount++;
       connectionQuality.value = ConnectionQuality.poor;
-      onError?.call('Connection failed ($_reconnectCount)');
-      onStatus?.call('Retrying...');
+      debugPrint('Seelo desktop connectError: $err');
+      onError?.call('Desktop connection error: $err');
+      onStatus?.call('Retrying ($_reconnectCount)');
     });
 
     socket.onDisconnect((_) {
@@ -576,7 +764,10 @@ class SeeloConnectionController {
   void _detectIssues() {
     final meta = currentMetadata;
     final list = <DesignIssue>[];
-    if (meta == null) { issues.value = list; return; }
+    if (meta == null) {
+      issues.value = list;
+      return;
+    }
     final fw = meta.frameWidth;
     final fh = meta.frameHeight;
     for (final layer in meta.textLayers) {
@@ -586,24 +777,77 @@ class SeeloConnectionController {
       final lh = (layer['height'] as num?)?.toDouble() ?? 0;
       final name = layer['characters']?.toString() ?? '';
       if (lw > fw && fw > 0) {
-        list.add(DesignIssue(type: 'overflow', message: 'Text wider than frame: "$name"', suggestion: 'Reduce font size or wrap text to fit within $fw\xD7$fh frame', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(
+          DesignIssue(
+            type: 'overflow',
+            message: 'Text wider than frame: "$name"',
+            suggestion:
+                'Reduce font size or wrap text to fit within $fw\xD7$fh frame',
+            x: lx,
+            y: ly,
+            width: lw,
+            height: lh,
+            layerName: name,
+          ),
+        );
       }
       if (lx + lw > fw && fw > 0) {
-        list.add(DesignIssue(type: 'overflow', message: 'Text extends past right edge', suggestion: 'Move text layer left or reduce width to fit within frame boundary', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(
+          DesignIssue(
+            type: 'overflow',
+            message: 'Text extends past right edge',
+            suggestion:
+                'Move text layer left or reduce width to fit within frame boundary',
+            x: lx,
+            y: ly,
+            width: lw,
+            height: lh,
+            layerName: name,
+          ),
+        );
       }
       if (ly + lh > fh && fh > 0) {
-        list.add(DesignIssue(type: 'overflow', message: 'Text extends past bottom edge', suggestion: 'Move text layer up or reduce height to stay within frame', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(
+          DesignIssue(
+            type: 'overflow',
+            message: 'Text extends past bottom edge',
+            suggestion:
+                'Move text layer up or reduce height to stay within frame',
+            x: lx,
+            y: ly,
+            width: lw,
+            height: lh,
+            layerName: name,
+          ),
+        );
       }
     }
     for (int i = 0; i < meta.textLayers.length; i++) {
       for (int j = i + 1; j < meta.textLayers.length; j++) {
-        final a = meta.textLayers[i]; final b = meta.textLayers[j];
-        final ax = (a['x'] as num?)?.toDouble() ?? 0; final ay = (a['y'] as num?)?.toDouble() ?? 0;
-        final aw = (a['width'] as num?)?.toDouble() ?? 0; final ah = (a['height'] as num?)?.toDouble() ?? 0;
-        final bx = (b['x'] as num?)?.toDouble() ?? 0; final by = (b['y'] as num?)?.toDouble() ?? 0;
-        final bw = (b['width'] as num?)?.toDouble() ?? 0; final bh = (b['height'] as num?)?.toDouble() ?? 0;
+        final a = meta.textLayers[i];
+        final b = meta.textLayers[j];
+        final ax = (a['x'] as num?)?.toDouble() ?? 0;
+        final ay = (a['y'] as num?)?.toDouble() ?? 0;
+        final aw = (a['width'] as num?)?.toDouble() ?? 0;
+        final ah = (a['height'] as num?)?.toDouble() ?? 0;
+        final bx = (b['x'] as num?)?.toDouble() ?? 0;
+        final by = (b['y'] as num?)?.toDouble() ?? 0;
+        final bw = (b['width'] as num?)?.toDouble() ?? 0;
+        final bh = (b['height'] as num?)?.toDouble() ?? 0;
         if (ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by) {
-          list.add(DesignIssue(type: 'overlap', message: 'Text layers overlap', suggestion: 'Reposition layers to avoid overlap, or use auto-layout', x: ax, y: ay, width: aw, height: ah, layerName: a['characters']?.toString() ?? ''));
+          list.add(
+            DesignIssue(
+              type: 'overlap',
+              message: 'Text layers overlap',
+              suggestion:
+                  'Reposition layers to avoid overlap, or use auto-layout',
+              x: ax,
+              y: ay,
+              width: aw,
+              height: ah,
+              layerName: a['characters']?.toString() ?? '',
+            ),
+          );
           break;
         }
       }
@@ -618,10 +862,34 @@ class SeeloConnectionController {
       final unsafeTop = fh * 0.08;
       final unsafeBottom = fh * 0.92;
       if (ly < unsafeTop && ly + lh > 0) {
-        list.add(DesignIssue(type: 'spacing', message: 'Text in top unsafe area', suggestion: 'Move text below ${unsafeTop.toInt()}px to avoid notch overlap', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(
+          DesignIssue(
+            type: 'spacing',
+            message: 'Text in top unsafe area',
+            suggestion:
+                'Move text below ${unsafeTop.toInt()}px to avoid notch overlap',
+            x: lx,
+            y: ly,
+            width: lw,
+            height: lh,
+            layerName: name,
+          ),
+        );
       }
       if (ly + lh > unsafeBottom) {
-        list.add(DesignIssue(type: 'spacing', message: 'Text in bottom unsafe area', suggestion: 'Move text above ${unsafeBottom.toInt()}px to avoid home indicator', x: lx, y: ly, width: lw, height: lh, layerName: name));
+        list.add(
+          DesignIssue(
+            type: 'spacing',
+            message: 'Text in bottom unsafe area',
+            suggestion:
+                'Move text above ${unsafeBottom.toInt()}px to avoid home indicator',
+            x: lx,
+            y: ly,
+            width: lw,
+            height: lh,
+            layerName: name,
+          ),
+        );
       }
     }
     issues.value = list;
@@ -643,7 +911,11 @@ class SeeloConnectionController {
         _latencySamples++;
         final avg = _latencySum ~/ _latencySamples;
         latencyMs.value = avg;
-        connectionQuality.value = avg < 50 ? ConnectionQuality.good : avg < 150 ? ConnectionQuality.fair : ConnectionQuality.poor;
+        connectionQuality.value = avg < 50
+            ? ConnectionQuality.good
+            : avg < 150
+            ? ConnectionQuality.fair
+            : ConnectionQuality.poor;
       }
     });
   }
@@ -651,8 +923,10 @@ class SeeloConnectionController {
   void requestNavigate(String direction) {
     if (!isConnected) return;
     _socket!.emit('navigate-frame', {
-      'type': 'navigate-frame', 'direction': direction,
-      'roomId': roomId, 'roomSecret': roomSecret,
+      'type': 'navigate-frame',
+      'direction': direction,
+      'roomId': roomId,
+      'roomSecret': roomSecret,
     });
   }
 
@@ -660,9 +934,12 @@ class SeeloConnectionController {
     if (!isConnected) return;
     final config = SeeloConfig();
     _socket!.emit('request-resize', {
-      'type': 'resize-frame', 'name': 'Seelo Mobile',
-      'width': config.screenWidth, 'height': config.screenHeight,
-      'roomId': roomId, 'roomSecret': roomSecret,
+      'type': 'resize-frame',
+      'name': 'Seelo Mobile',
+      'width': config.screenWidth,
+      'height': config.screenHeight,
+      'roomId': roomId,
+      'roomSecret': roomSecret,
     });
   }
 
@@ -707,7 +984,12 @@ class _SplashScreenState extends State<SplashScreen> {
       body: Center(
         child: Text(
           'Seelo',
-          style: TextStyle(color: AppPalette.white, fontWeight: FontWeight.w800, fontSize: 40, letterSpacing: 1),
+          style: TextStyle(
+            color: AppPalette.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 40,
+            letterSpacing: 1,
+          ),
         ),
       ),
     );
@@ -726,14 +1008,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   int _index = 0;
 
   static const slides = [
-    (title: 'Live Figma Preview', body: 'See your Figma frames live on phone with low-latency local sync.'),
-    (title: 'Quick Pairing', body: 'Scan desktop QR to connect instantly over same Wi-Fi.'),
-    (title: 'Swipe And Review', body: 'Swipe left-right for pages and scroll vertically for long screens.'),
+    (
+      title: 'Live Figma Preview',
+      body: 'See your Figma frames live on phone with low-latency local sync.',
+    ),
+    (
+      title: 'Quick Pairing',
+      body: 'Scan desktop QR to connect instantly over same Wi-Fi.',
+    ),
+    (
+      title: 'Swipe And Review',
+      body:
+          'Swipe left-right for pages and scroll vertically for long screens.',
+    ),
   ];
 
   void _finish() {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => HomeScreen(controller: SeeloConnectionController())),
+      MaterialPageRoute(
+        builder: (_) => HomeScreen(controller: SeeloConnectionController()),
+      ),
     );
   }
 
@@ -763,9 +1057,25 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(slide.title, textAlign: TextAlign.center, style: const TextStyle(color: AppPalette.text, fontSize: 28, fontWeight: FontWeight.w700)),
+                          Text(
+                            slide.title,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: AppPalette.text,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                           const SizedBox(height: 16),
-                          Text(slide.body, textAlign: TextAlign.center, style: const TextStyle(color: AppPalette.dim, fontSize: 15, height: 1.4)),
+                          Text(
+                            slide.body,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: AppPalette.dim,
+                              fontSize: 15,
+                              height: 1.4,
+                            ),
+                          ),
                         ],
                       ),
                     );
@@ -774,32 +1084,46 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(slides.length, (i) => Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: i == _index ? 18 : 8, height: 8,
-                  decoration: BoxDecoration(
-                    color: i == _index ? Colors.white : const Color(0xFF4A4A4A),
-                    borderRadius: BorderRadius.circular(999),
+                children: List.generate(
+                  slides.length,
+                  (i) => Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: i == _index ? 18 : 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: i == _index
+                          ? Colors.white
+                          : const Color(0xFF4A4A4A),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                   ),
-                )),
+                ),
               ),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white, foregroundColor: Colors.black,
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
                     padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                   onPressed: () {
                     if (_index < slides.length - 1) {
-                      _controller.nextPage(duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+                      _controller.nextPage(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOut,
+                      );
                     } else {
                       _finish();
                     }
                   },
-                  child: Text(_index < slides.length - 1 ? 'Next' : 'Get Started'),
+                  child: Text(
+                    _index < slides.length - 1 ? 'Next' : 'Get Started',
+                  ),
                 ),
               ),
             ],
@@ -833,23 +1157,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openPreview() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PreviewScreen(controller: widget.controller)),
+      MaterialPageRoute(
+        builder: (_) => PreviewScreen(controller: widget.controller),
+      ),
     );
   }
 
   void _scanAndConnect() {
-    Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(builder: (_) => const QrScanScreen()),
-    ).then((payload) {
-      if (!mounted || payload == null) return;
-      setState(() => _error = '');
-      widget.controller.connectWithPayload(
-        payload: payload,
-        onConnected: _openPreview,
-        onError: (msg) { if (mounted) setState(() => _error = msg); },
-        onStatus: (msg) { if (mounted) setState(() => _status = msg); },
-      );
-    });
+    Navigator.of(context)
+        .push<Map<String, dynamic>>(
+          MaterialPageRoute(builder: (_) => const QrScanScreen()),
+        )
+        .then((payload) {
+          if (!mounted || payload == null) return;
+          setState(() => _error = '');
+          widget.controller.connectWithPayload(
+            payload: payload,
+            onConnected: _openPreview,
+            onError: (msg) {
+              if (mounted) setState(() => _error = msg);
+            },
+            onStatus: (msg) {
+              if (mounted) setState(() => _status = msg);
+            },
+          );
+        });
   }
 
   void _manualConnect() {
@@ -862,7 +1194,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
 
     if (uri == null || uri.host.isEmpty) {
-      setState(() => _error = 'Invalid server address. Use ip:port or http://ip:port');
+      setState(
+        () => _error = 'Invalid server address. Use ip:port or http://ip:port',
+      );
       return;
     }
 
@@ -874,8 +1208,12 @@ class _HomeScreenState extends State<HomeScreen> {
         'roomId': SeeloConfig().defaultRoomId,
       },
       onConnected: _openPreview,
-      onError: (msg) { if (mounted) setState(() => _error = msg); },
-      onStatus: (msg) { if (mounted) setState(() => _status = msg); },
+      onError: (msg) {
+        if (mounted) setState(() => _error = msg);
+      },
+      onStatus: (msg) {
+        if (mounted) setState(() => _status = msg);
+      },
     );
   }
 
@@ -883,35 +1221,52 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Seelo', style: TextStyle(fontWeight: FontWeight.w700)),
+        title: const Text(
+          'Seelo',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
         actions: [
           ValueListenableBuilder<ConnectionQuality>(
             valueListenable: widget.controller.connectionQuality,
             builder: (_, q, _) {
-              final dotColor = q == ConnectionQuality.good ? const Color(0xFF22C55E)
-                : q == ConnectionQuality.fair ? const Color(0xFFEAB308)
-                : q == ConnectionQuality.poor ? const Color(0xFFEF4444)
-                : AppPalette.dim;
+              final dotColor = q == ConnectionQuality.good
+                  ? const Color(0xFF22C55E)
+                  : q == ConnectionQuality.fair
+                  ? const Color(0xFFEAB308)
+                  : q == ConnectionQuality.poor
+                  ? const Color(0xFFEF4444)
+                  : AppPalette.dim;
               return Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Tooltip(
-                  message: q == ConnectionQuality.disconnected ? 'Disconnected' : widget.controller.serverLabel,
+                  message: q == ConnectionQuality.disconnected
+                      ? 'Disconnected'
+                      : widget.controller.serverLabel,
                   child: Container(
-                    width: 10, height: 10, margin: const EdgeInsets.only(right: 4),
-                    decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                    width: 10,
+                    height: 10,
+                    margin: const EdgeInsets.only(right: 4),
+                    decoration: BoxDecoration(
+                      color: dotColor,
+                    shape: BoxShape.circle,
                   ),
                 ),
-              );
-            },
+              ),
+            );
+          },
           ),
           IconButton(
             icon: const Icon(Icons.workspace_premium, color: Color(0xFF6366F1)),
             tooltip: 'Plans',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SubscriptionScreen())),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.white70),
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white38, size: 20),
@@ -939,10 +1294,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     decoration: InputDecoration(
                       hintText: 'Server address (e.g. 192.168.1.5:3000)',
                       hintStyle: const TextStyle(color: AppPalette.dim),
-                      filled: true, fillColor: AppPalette.cardSoft,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppPalette.border)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppPalette.border)),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white70)),
+                      filled: true,
+                      fillColor: AppPalette.cardSoft,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppPalette.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppPalette.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Colors.white70),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -950,9 +1315,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white, foregroundColor: Colors.black,
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       onPressed: _manualConnect,
                       child: const Text('Connect'),
@@ -968,15 +1336,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   const Text('Quick Pairing', style: _h),
                   const SizedBox(height: 8),
-                  const Text('Scan desktop QR to connect instantly.', style: TextStyle(color: AppPalette.dim)),
+                  const Text(
+                    'Scan desktop QR to connect instantly.',
+                    style: TextStyle(color: AppPalette.dim),
+                  ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white, foregroundColor: Colors.black,
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       onPressed: _scanAndConnect,
                       icon: const Icon(Icons.qr_code_scanner),
@@ -987,18 +1361,43 @@ class _HomeScreenState extends State<HomeScreen> {
                   ValueListenableBuilder<ConnectionQuality>(
                     valueListenable: widget.controller.connectionQuality,
                     builder: (_, q, _) {
-                      final dotColor = q == ConnectionQuality.good ? const Color(0xFF22C55E)
-                        : q == ConnectionQuality.fair ? const Color(0xFFEAB308)
-                        : q == ConnectionQuality.poor ? const Color(0xFFEF4444)
-                        : AppPalette.dim;
+                      final dotColor = q == ConnectionQuality.good
+                          ? const Color(0xFF22C55E)
+                          : q == ConnectionQuality.fair
+                          ? const Color(0xFFEAB308)
+                          : q == ConnectionQuality.poor
+                          ? const Color(0xFFEF4444)
+                          : AppPalette.dim;
                       return Row(
                         children: [
-                          Container(width: 8, height: 8, margin: const EdgeInsets.only(right: 6),
-                            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
-                          Text('Status: $_status', style: const TextStyle(color: AppPalette.text, fontSize: 13)),
+                          Container(
+                            width: 8,
+                            height: 8,
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(
+                              color: dotColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          Text(
+                            'Status: $_status',
+                            style: const TextStyle(
+                              color: AppPalette.text,
+                              fontSize: 13,
+                            ),
+                          ),
                           if (widget.controller.connecting)
-                            const Padding(padding: EdgeInsets.only(left: 8),
-                              child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))),
+                            const Padding(
+                              padding: EdgeInsets.only(left: 8),
+                              child: SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ),
                         ],
                       );
                     },
@@ -1011,9 +1410,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: BoxDecoration(
                           color: Colors.red.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                          border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.3),
+                          ),
                         ),
-                        child: Text(_error, style: const TextStyle(color: Color(0xFFF5A0A0), fontSize: 13)),
+                        child: Text(
+                          _error,
+                          style: const TextStyle(
+                            color: Color(0xFFF5A0A0),
+                            fontSize: 13,
+                          ),
+                        ),
                       ),
                     ),
                 ],
@@ -1040,7 +1447,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 list.clear();
                                 widget.controller.savedDevices.value = list;
                               },
-                              child: const Text('Clear', style: TextStyle(color: AppPalette.dim, fontSize: 12)),
+                              child: const Text(
+                                'Clear',
+                                style: TextStyle(
+                                  color: AppPalette.dim,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -1057,18 +1470,40 @@ class _HomeScreenState extends State<HomeScreen> {
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.computer, color: AppPalette.dim, size: 18),
+                                  const Icon(
+                                    Icons.computer,
+                                    color: AppPalette.dim,
+                                    size: 18,
+                                  ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Text(d.displayLabel, style: const TextStyle(color: AppPalette.text, fontSize: 13, fontWeight: FontWeight.w500)),
-                                        Text(d.roomId, style: const TextStyle(color: AppPalette.dim, fontSize: 11)),
+                                        Text(
+                                          d.displayLabel,
+                                          style: const TextStyle(
+                                            color: AppPalette.text,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                        Text(
+                                          d.roomId,
+                                          style: const TextStyle(
+                                            color: AppPalette.dim,
+                                            fontSize: 11,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
-                                  const Icon(Icons.chevron_right, color: AppPalette.dim, size: 18),
+                                  const Icon(
+                                    Icons.chevron_right,
+                                    color: AppPalette.dim,
+                                    size: 18,
+                                  ),
                                 ],
                               ),
                             ),
@@ -1123,11 +1558,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final c = SeeloConfig();
     c.screenWidth = int.tryParse(_widthC.text) ?? c.screenWidth;
     c.screenHeight = int.tryParse(_heightC.text) ?? c.screenHeight;
-    c.defaultRoomId = _roomC.text.trim().isEmpty ? c.defaultRoomId : _roomC.text.trim();
+    c.defaultRoomId = _roomC.text.trim().isEmpty
+        ? c.defaultRoomId
+        : _roomC.text.trim();
     c.defaultPort = int.tryParse(_portC.text) ?? c.defaultPort;
     Navigator.of(context).pop();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved'), duration: Duration(seconds: 1)),
+      const SnackBar(
+        content: Text('Settings saved'),
+        duration: Duration(seconds: 1),
+      ),
     );
   }
 
@@ -1145,7 +1585,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   const Text('Preview Size', style: _h),
                   const SizedBox(height: 4),
-                  const Text('Default screen dimensions for preview.', style: TextStyle(color: AppPalette.dim, fontSize: 13)),
+                  const Text(
+                    'Default screen dimensions for preview.',
+                    style: TextStyle(color: AppPalette.dim, fontSize: 13),
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -1159,7 +1602,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Text('\u00D7', style: TextStyle(color: AppPalette.dim, fontSize: 18)),
+                        child: Text(
+                          '\u00D7',
+                          style: TextStyle(color: AppPalette.dim, fontSize: 18),
+                        ),
                       ),
                       Expanded(
                         child: TextField(
@@ -1201,9 +1647,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white, foregroundColor: Colors.black,
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 onPressed: _save,
                 child: const Text('Save Settings'),
@@ -1222,9 +1671,18 @@ InputDecoration _inputDeco(String hint) {
     hintStyle: const TextStyle(color: AppPalette.dim),
     filled: true,
     fillColor: AppPalette.cardSoft,
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppPalette.border)),
-    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppPalette.border)),
-    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white70)),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: AppPalette.border),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: AppPalette.border),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: Colors.white70),
+    ),
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
   );
 }
@@ -1251,20 +1709,26 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _quickLoginQr() {
-    Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(builder: (_) => const QrScanScreen()),
-    ).then((payload) {
-      if (!mounted || payload == null) return;
-      widget.controller.connectWithPayload(
-        payload: payload,
-        onConnected: () {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => PreviewScreen(controller: widget.controller)),
+    Navigator.of(context)
+        .push<Map<String, dynamic>>(
+          MaterialPageRoute(builder: (_) => const QrScanScreen()),
+        )
+        .then((payload) {
+          if (!mounted || payload == null) return;
+          widget.controller.connectWithPayload(
+            payload: payload,
+            onConnected: () {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => PreviewScreen(controller: widget.controller),
+                ),
+              );
+            },
+            onError: (msg) {
+              if (mounted) setState(() => _error = msg);
+            },
           );
-        },
-        onError: (msg) { if (mounted) setState(() => _error = msg); },
-      );
-    });
+        });
   }
 
   @override
@@ -1289,24 +1753,32 @@ class _LoginScreenState extends State<LoginScreen> {
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white, foregroundColor: Colors.black,
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       onPressed: () async {
                         try {
-                          await FirebaseAuth.instance.signInWithEmailAndPassword(
-                            email: _email.text.trim(),
-                            password: _password.text,
-                          );
+                          await FirebaseAuth.instance
+                              .signInWithEmailAndPassword(
+                                email: _email.text.trim(),
+                                password: _password.text,
+                              );
                           if (!context.mounted) return;
                           Navigator.of(context).pop();
                         } on FirebaseAuthException catch (e) {
                           setState(() {
-                            _error = e.code == 'user-not-found' ? 'No account found'
-                                : e.code == 'wrong-password' ? 'Incorrect password'
-                                : e.code == 'invalid-credential' ? 'Invalid email or password'
-                                : e.code == 'too-many-requests' ? 'Too many attempts'
+                            _error = e.code == 'user-not-found'
+                                ? 'No account found'
+                                : e.code == 'wrong-password'
+                                ? 'Incorrect password'
+                                : e.code == 'invalid-credential'
+                                ? 'Invalid email or password'
+                                : e.code == 'too-many-requests'
+                                ? 'Too many attempts'
                                 : e.message ?? 'Login failed';
                           });
                         }
@@ -1324,7 +1796,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   const Text('Quick Login via Desktop QR', style: _h),
                   const SizedBox(height: 8),
-                  const Text('Scan QR from desktop app and login instantly.', style: TextStyle(color: AppPalette.dim)),
+                  const Text(
+                    'Scan QR from desktop app and login instantly.',
+                    style: TextStyle(color: AppPalette.dim),
+                  ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
@@ -1333,7 +1808,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         foregroundColor: Colors.white,
                         side: const BorderSide(color: AppPalette.border),
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       onPressed: _quickLoginQr,
                       icon: const Icon(Icons.qr_code),
@@ -1342,7 +1819,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   if (_error.isNotEmpty) ...[
                     const SizedBox(height: 10),
-                    Text(_error, style: const TextStyle(color: Color(0xFFD3D3D3))),
+                    Text(
+                      _error,
+                      style: const TextStyle(color: Color(0xFFD3D3D3)),
+                    ),
                   ],
                 ],
               ),
@@ -1363,9 +1843,18 @@ class _LoginScreenState extends State<LoginScreen> {
         hintStyle: const TextStyle(color: AppPalette.dim),
         filled: true,
         fillColor: AppPalette.cardSoft,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppPalette.border)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppPalette.border)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.white70)),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppPalette.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppPalette.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.white70),
+        ),
       ),
     );
   }
@@ -1412,17 +1901,27 @@ class _QrScanScreenState extends State<QrScanScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 260, height: 260,
+                    width: 260,
+                    height: 260,
                     decoration: BoxDecoration(
                       border: Border.all(color: Colors.white, width: 2),
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text('Scan desktop QR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  const Text(
+                    'Scan desktop QR',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   OutlinedButton(
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white60)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white60),
+                    ),
                     onPressed: () => Navigator.of(context).pop(),
                     child: const Text('Back'),
                   ),
@@ -1447,7 +1946,8 @@ class PreviewScreen extends StatefulWidget {
   State<PreviewScreen> createState() => _PreviewScreenState();
 }
 
-class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserver {
+class _PreviewScreenState extends State<PreviewScreen>
+    with WidgetsBindingObserver {
   StreamSubscription<AccelerometerEvent>? _shakeSub;
   DateTime? _lastShake;
   bool _showingPopup = false;
@@ -1458,6 +1958,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   bool _showRulers = false;
   bool _showDeviceFrame = false;
   bool _overlayMode = false;
+  bool _overlayCompare = false;
+  double _overlayCompareSliderPos = 0.5;
   final double _overlayOpacity = 0.5;
   bool _showToolbar = true;
   bool _isLandscape = false;
@@ -1467,7 +1969,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   Timer? _toolbarTimer;
   DisplayMode _displayMode = DisplayMode.fitToScreen;
   DevicePreset _selectedPreset = builtInPresets[0];
-  final TransformationController _transformationController = TransformationController();
+  final TransformationController _transformationController =
+      TransformationController();
   final GlobalKey _imageKey = GlobalKey();
   final GlobalKey _screenshotKey = GlobalKey();
 
@@ -1494,30 +1997,59 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
           children: [
             Container(
               padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(color: const Color(0xFFEF4444).withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.link_off_rounded, color: Color(0xFFEF4444), size: 20),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.link_off_rounded,
+                color: Color(0xFFEF4444),
+                size: 20,
+              ),
             ),
             const SizedBox(width: 10),
-            const Text('Disconnected', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white)),
+            const Text(
+              'Disconnected',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+              ),
+            ),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(err, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14, height: 1.4)),
+            Text(
+              err,
+              style: const TextStyle(
+                color: Color(0xFF94A3B8),
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFF2D2E3A), borderRadius: BorderRadius.circular(8),
+                color: const Color(0xFF2D2E3A),
+                borderRadius: BorderRadius.circular(8),
               ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.info_outline_rounded, size: 14, color: Color(0xFF64748B)),
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 14,
+                    color: Color(0xFF64748B),
+                  ),
                   SizedBox(width: 6),
-                  Text('Free plan: 1 active device', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                  Text(
+                    'Free plan: 1 active device',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  ),
                 ],
               ),
             ),
@@ -1530,7 +2062,9 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
               Navigator.of(ctx).pop();
               Navigator.of(context).pop();
             },
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFF94A3B8)),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF94A3B8),
+            ),
             child: const Text('Go Back'),
           ),
         ],
@@ -1566,26 +2100,33 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   void _applySystemUiMode() {
     if (_showSystemUi) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        systemNavigationBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light,
-      ));
+      SystemChrome.setSystemUIOverlayStyle(
+        const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          systemNavigationBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+        ),
+      );
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
-      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        systemNavigationBarColor: Colors.transparent,
-      ));
+      SystemChrome.setSystemUIOverlayStyle(
+        const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          systemNavigationBarColor: Colors.transparent,
+        ),
+      );
     }
   }
 
   void _handleShake(AccelerometerEvent event) {
-    final magnitude = sqrt((event.x * event.x) + (event.y * event.y) + (event.z * event.z));
+    final magnitude = sqrt(
+      (event.x * event.x) + (event.y * event.y) + (event.z * event.z),
+    );
     if (magnitude < 25) return;
 
     final now = DateTime.now();
-    if (_lastShake != null && now.difference(_lastShake!).inMilliseconds < 1400) return;
+    if (_lastShake != null && now.difference(_lastShake!).inMilliseconds < 1400)
+      return;
     _lastShake = now;
 
     if (_showingPopup || !mounted) return;
@@ -1599,159 +2140,348 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
       builder: (ctx) {
         bool localShowUi = _showSystemUi;
         DisplayMode localMode = _displayMode;
+        bool localIssues = _showIssues;
+        bool localSafeArea = _showSafeArea;
+        bool localGrid = _showGrid;
+        bool localRulers = _showRulers;
+        bool localDeviceFrame = _showDeviceFrame;
+        bool localOverlayCompare = _overlayCompare;
+        final isTabletSettings = MediaQuery.of(ctx).size.shortestSide >= 600;
         return AlertDialog(
           backgroundColor: AppPalette.card,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Preview Settings', style: TextStyle(color: AppPalette.text)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          insetPadding: isTabletSettings
+              ? EdgeInsets.symmetric(horizontal: MediaQuery.of(ctx).size.width * 0.15, vertical: 40)
+              : null,
+          title: const Text(
+            'Preview Settings',
+            style: TextStyle(color: AppPalette.text),
+          ),
           content: StatefulBuilder(
             builder: (context, setInner) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Customize your immersive experience.', style: TextStyle(color: AppPalette.dim)),
-                  const SizedBox(height: 20),
-                  _settingToggle('Show System UI', 'Display status/nav bars', localShowUi, (v) {
-                    setInner(() => localShowUi = v);
-                    setState(() => _showSystemUi = v);
-                    _applySystemUiMode();
-                  }),
-                  const SizedBox(height: 16),
-                  const Text('Overlays', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  _settingToggle('Issue Highlighting', 'Show overflow/overlap warnings', _showIssues, (v) {
-                    setState(() => _showIssues = v);
-                  }),
-                  const SizedBox(height: 8),
-                  _settingToggle('Safe Area', 'Visualize safe zone boundaries', _showSafeArea, (v) {
-                    setState(() => _showSafeArea = v);
-                  }),
-                  const SizedBox(height: 8),
-                  _settingToggle('Pixel Grid', '8×8 px alignment grid', _showGrid, (v) {
-                    setState(() => _showGrid = v);
-                  }),
-                  const SizedBox(height: 8),
-                  PremiumGate(
-                    feature: PremiumFeature.rulers,
-                    child: _settingToggle('Rulers', 'Show measurement rulers', _showRulers, (v) {
-                      setState(() => _showRulers = v);
-                    }),
-                  ),
-                  const SizedBox(height: 8),
-                  PremiumGate(
-                    feature: PremiumFeature.deviceFrame,
-                    child: _settingToggle('Device Frame', 'Show bezel + notch overlay', _showDeviceFrame, (v) {
-                      setState(() => _showDeviceFrame = v);
-                    }),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text('Display Mode', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  _modeChip('Fit to Screen', 'Stretch image to fill screen width', DisplayMode.fitToScreen, localMode, setInner),
-                  const SizedBox(height: 6),
-                  _modeChip('Pixel Perfect', '1:1 native resolution, no stretching', DisplayMode.pixelPerfect, localMode, setInner),
-                  const SizedBox(height: 16),
-                  const Text('Device Preset', style: TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  Container(
-                    constraints: const BoxConstraints(maxHeight: 180),
-                    child: SingleChildScrollView(
-                      child: Column(
-                        children: [
-                          // Custom presets
-                          ...widget.controller.customPresets.map((preset) {
-                            final active = _selectedPreset.name == preset.name;
-                            return InkWell(
-                              onTap: () => setState(() => _selectedPreset = preset),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                margin: const EdgeInsets.only(bottom: 4),
-                                decoration: BoxDecoration(
-                                  color: active ? const Color(0x3322C55E) : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: active ? Border.all(color: const Color(0x5522C55E)) : null,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.star, size: 16, color: active ? const Color(0xFF22C55E) : const Color(0xAA22C55E)),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: Text(preset.label, style: TextStyle(color: active ? Colors.white : const Color(0xCC22C55E), fontSize: 13))),
-                                    GestureDetector(
-                                      onTap: () => setState(() => widget.controller.customPresets.remove(preset)),
-                                      child: const Icon(Icons.close, size: 14, color: AppPalette.dim),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }),
-                          if (widget.controller.customPresets.isNotEmpty)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 4),
-                              child: Divider(color: AppPalette.border, height: 1),
-                            ),
-                          // Built-in presets
-                          ...builtInPresets.map((preset) {
-                            final active = _selectedPreset.name == preset.name;
-                            return InkWell(
-                              onTap: () => setState(() => _selectedPreset = preset),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                margin: const EdgeInsets.only(bottom: 4),
-                                decoration: BoxDecoration(
-                                  color: active ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: active ? Border.all(color: Colors.white24) : null,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(active ? Icons.check_circle : Icons.phone_android, size: 16,
-                                        color: active ? const Color(0xFF22C55E) : AppPalette.dim),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: Text(preset.label, style: TextStyle(color: active ? Colors.white : AppPalette.dim, fontSize: 13))),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
+              return SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Customize your immersive experience.',
+                      style: TextStyle(color: AppPalette.dim),
+                    ),
+                    const SizedBox(height: 20),
+                    _settingToggle(
+                      'Show System UI',
+                      'Display status/nav bars',
+                      localShowUi,
+                      (v) {
+                        setInner(() => localShowUi = v);
+                        setState(() {
+                          _showSystemUi = v;
+                          _applySystemUiMode();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Overlays',
+                      style: TextStyle(
+                        color: AppPalette.text,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  Builder(builder: (_) {
-                    final m = widget.controller.currentMetadata;
-                    if (m == null) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: TextButton.icon(
-                          onPressed: () {
-                            final p = DevicePreset(name: '${m.frameWidth.toInt()}x${m.frameHeight.toInt()}', screenWidth: m.frameWidth, screenHeight: m.frameHeight);
-                            if (widget.controller.customPresets.any((x) => x.name == p.name)) return;
-                            widget.controller.customPresets.insert(0, p);
-                            setState(() => _selectedPreset = p);
-                          },
-                          icon: const Icon(Icons.add, size: 16),
-                          label: const Text('Save Current as Preset', style: TextStyle(fontSize: 12)),
-                          style: TextButton.styleFrom(foregroundColor: AppPalette.dim, padding: const EdgeInsets.symmetric(vertical: 8)),
+                    const SizedBox(height: 8),
+                    _settingToggle(
+                      'Issue Highlighting',
+                      'Show overflow/overlap warnings',
+                      localIssues,
+                      (v) {
+                        setInner(() => localIssues = v);
+                        setState(() => _showIssues = v);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _settingToggle(
+                      'Safe Area',
+                      'Visualize safe zone boundaries',
+                      localSafeArea,
+                      (v) {
+                        setInner(() => localSafeArea = v);
+                        setState(() => _showSafeArea = v);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _settingToggle(
+                      'Pixel Grid',
+                      '8×8 px alignment grid',
+                      localGrid,
+                      (v) {
+                        setInner(() => localGrid = v);
+                        setState(() => _showGrid = v);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    PremiumGate(
+                      feature: PremiumFeature.rulers,
+                      child: _settingToggle(
+                        'Rulers',
+                        'Show measurement rulers',
+                        localRulers,
+                        (v) {
+                          setInner(() => localRulers = v);
+                          setState(() => _showRulers = v);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    PremiumGate(
+                      feature: PremiumFeature.deviceFrame,
+                      child: _settingToggle(
+                        'Device Frame',
+                        'Show bezel + notch overlay',
+                        localDeviceFrame,
+                        (v) {
+                          setInner(() => localDeviceFrame = v);
+                          setState(() => _showDeviceFrame = v);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    PremiumGate(
+                      feature: PremiumFeature.overlayCompare,
+                      child: _settingToggle(
+                        'Overlay Compare',
+                        'Slide to compare with previous design',
+                        localOverlayCompare,
+                        (v) {
+                          setInner(() => localOverlayCompare = v);
+                          setState(() => _overlayCompare = v);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Display Mode',
+                      style: TextStyle(
+                        color: AppPalette.text,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _modeChip(
+                      'Fit to Screen',
+                      'Stretch image to fill screen width',
+                      DisplayMode.fitToScreen,
+                      localMode,
+                      setInner,
+                      (m) => setInner(() { localMode = m; }),
+                    ),
+                    const SizedBox(height: 6),
+                    _modeChip(
+                      'Pixel Perfect',
+                      '1:1 native resolution, no stretching',
+                      DisplayMode.pixelPerfect,
+                      localMode,
+                      setInner,
+                      (m) => setInner(() { localMode = m; }),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Device Preset',
+                      style: TextStyle(
+                        color: AppPalette.text,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            // Custom presets
+                            ...widget.controller.customPresets.map((preset) {
+                              final active =
+                                  _selectedPreset.name == preset.name;
+                              return InkWell(
+                                onTap: () =>
+                                    setState(() => _selectedPreset = preset),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                  decoration: BoxDecoration(
+                                    color: active
+                                        ? const Color(0x3322C55E)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: active
+                                        ? Border.all(
+                                            color: const Color(0x5522C55E),
+                                          )
+                                        : null,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.star,
+                                        size: 16,
+                                        color: active
+                                            ? const Color(0xFF22C55E)
+                                            : const Color(0xAA22C55E),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          preset.label,
+                                          style: TextStyle(
+                                            color: active
+                                                ? Colors.white
+                                                : const Color(0xCC22C55E),
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: () => setState(
+                                          () => widget.controller.customPresets
+                                              .remove(preset),
+                                        ),
+                                        child: const Icon(
+                                          Icons.close,
+                                          size: 14,
+                                          color: AppPalette.dim,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }),
+                            if (widget.controller.customPresets.isNotEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 4),
+                                child: Divider(
+                                  color: AppPalette.border,
+                                  height: 1,
+                                ),
+                              ),
+                            // Built-in presets
+                            ...builtInPresets.map((preset) {
+                              final active =
+                                  _selectedPreset.name == preset.name;
+                              return InkWell(
+                                onTap: () =>
+                                    setState(() => _selectedPreset = preset),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                  decoration: BoxDecoration(
+                                    color: active
+                                        ? Colors.white.withValues(alpha: 0.1)
+                                        : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: active
+                                        ? Border.all(color: Colors.white24)
+                                        : null,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        active
+                                            ? Icons.check_circle
+                                            : Icons.phone_android,
+                                        size: 16,
+                                        color: active
+                                            ? const Color(0xFF22C55E)
+                                            : AppPalette.dim,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          preset.label,
+                                          style: TextStyle(
+                                            color: active
+                                                ? Colors.white
+                                                : AppPalette.dim,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
                         ),
                       ),
-                    );
-                  }),
-                ],
+                    ),
+                    Builder(
+                      builder: (_) {
+                        final m = widget.controller.currentMetadata;
+                        if (m == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: TextButton.icon(
+                              onPressed: () {
+                                final p = DevicePreset(
+                                  name:
+                                      '${m.frameWidth.toInt()}x${m.frameHeight.toInt()}',
+                                  screenWidth: m.frameWidth,
+                                  screenHeight: m.frameHeight,
+                                );
+                                if (widget.controller.customPresets.any(
+                                  (x) => x.name == p.name,
+                                ))
+                                  return;
+                                widget.controller.customPresets.insert(0, p);
+                                setState(() => _selectedPreset = p);
+                              },
+                              icon: const Icon(Icons.add, size: 16),
+                              label: const Text(
+                                'Save Current as Preset',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppPalette.dim,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               );
             },
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close', style: TextStyle(color: Colors.white70)),
+              child: const Text(
+                'Close',
+                style: TextStyle(color: Colors.white70),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white, foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               onPressed: () {
                 Navigator.of(context).pop();
@@ -1771,7 +2501,9 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppPalette.card,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) {
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
@@ -1780,32 +2512,75 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Center(
-                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppPalette.dim, borderRadius: BorderRadius.circular(2))),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppPalette.dim,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
-              Text('Session History', style: const TextStyle(color: AppPalette.text, fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(
+                'Session History',
+                style: const TextStyle(
+                  color: AppPalette.text,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 4),
-              Text('${history.length} session${history.length != 1 ? 's' : ''}', style: const TextStyle(color: AppPalette.dim, fontSize: 13)),
+              Text(
+                '${history.length} session${history.length != 1 ? 's' : ''}',
+                style: const TextStyle(color: AppPalette.dim, fontSize: 13),
+              ),
               const SizedBox(height: 16),
               if (history.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 40),
-                  child: Center(child: Text('No sessions yet', style: TextStyle(color: AppPalette.dim))),
+                  child: Center(
+                    child: Text(
+                      'No sessions yet',
+                      style: TextStyle(color: AppPalette.dim),
+                    ),
+                  ),
                 )
               else
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: history.length,
-                    separatorBuilder: (_, _) => const Divider(color: AppPalette.border, height: 1),
+                    separatorBuilder: (_, _) =>
+                        const Divider(color: AppPalette.border, height: 1),
                     itemBuilder: (_, i) {
                       final entry = history[i];
-                      final icon = entry.isCloud ? Icons.cloud : Icons.desktop_windows;
+                      final icon = entry.isCloud
+                          ? Icons.cloud
+                          : Icons.desktop_windows;
                       return ListTile(
                         dense: true,
-                        leading: Icon(icon, color: entry.isCloud ? const Color(0xFF22C55E) : AppPalette.dim, size: 20),
-                        title: Text(entry.label, style: const TextStyle(color: AppPalette.text, fontSize: 14)),
-                        subtitle: Text(_formatTime(entry.time), style: const TextStyle(color: AppPalette.dim, fontSize: 11)),
+                        leading: Icon(
+                          icon,
+                          color: entry.isCloud
+                              ? const Color(0xFF22C55E)
+                              : AppPalette.dim,
+                          size: 20,
+                        ),
+                        title: Text(
+                          entry.label,
+                          style: const TextStyle(
+                            color: AppPalette.text,
+                            fontSize: 14,
+                          ),
+                        ),
+                        subtitle: Text(
+                          _formatTime(entry.time),
+                          style: const TextStyle(
+                            color: AppPalette.dim,
+                            fontSize: 11,
+                          ),
+                        ),
                         contentPadding: EdgeInsets.zero,
                       );
                     },
@@ -1823,7 +2598,9 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppPalette.card,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) {
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
@@ -1832,28 +2609,58 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Center(
-                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppPalette.dim, borderRadius: BorderRadius.circular(2))),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppPalette.dim,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF22C55E)),
+                  const Icon(
+                    Icons.auto_awesome,
+                    size: 18,
+                    color: Color(0xFF22C55E),
+                  ),
                   const SizedBox(width: 8),
-                  Text('Smart Suggestions', style: const TextStyle(color: AppPalette.text, fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(
+                    'Smart Suggestions',
+                    style: const TextStyle(
+                      color: AppPalette.text,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 4),
-              Text('${issues.length} issue${issues.length != 1 ? 's' : ''} found', style: const TextStyle(color: AppPalette.dim, fontSize: 13)),
+              Text(
+                '${issues.length} issue${issues.length != 1 ? 's' : ''} found',
+                style: const TextStyle(color: AppPalette.dim, fontSize: 13),
+              ),
               const SizedBox(height: 16),
               Flexible(
                 child: ListView.separated(
                   shrinkWrap: true,
                   itemCount: issues.length,
-                  separatorBuilder: (_, _) => const Divider(color: AppPalette.border, height: 1),
+                  separatorBuilder: (_, _) =>
+                      const Divider(color: AppPalette.border, height: 1),
                   itemBuilder: (_, i) {
                     final issue = issues[i];
-                    final icon = issue.type == 'overflow' ? Icons.arrow_outward : issue.type == 'spacing' ? Icons.space_bar : Icons.layers;
-                    final color = issue.type == 'overflow' ? const Color(0xFFFF4757) : issue.type == 'spacing' ? const Color(0xFFFFA502) : const Color(0xFF22C55E);
+                    final icon = issue.type == 'overflow'
+                        ? Icons.arrow_outward
+                        : issue.type == 'spacing'
+                        ? Icons.space_bar
+                        : Icons.layers;
+                    final color = issue.type == 'overflow'
+                        ? const Color(0xFFFF4757)
+                        : issue.type == 'spacing'
+                        ? const Color(0xFFFFA502)
+                        : const Color(0xFF22C55E);
                     return SizedBox(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1863,14 +2670,27 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               Icon(icon, size: 16, color: color),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text(issue.message, style: const TextStyle(color: AppPalette.text, fontSize: 13, fontWeight: FontWeight.w600)),
+                                child: Text(
+                                  issue.message,
+                                  style: const TextStyle(
+                                    color: AppPalette.text,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 4),
                           Padding(
                             padding: const EdgeInsets.only(left: 24),
-                            child: Text(issue.suggestion, style: const TextStyle(color: AppPalette.dim, fontSize: 12)),
+                            child: Text(
+                              issue.suggestion,
+                              style: const TextStyle(
+                                color: AppPalette.dim,
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -1896,44 +2716,62 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
 
   Future<void> _takeScreenshot() async {
     try {
-      final boundary = _screenshotKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      final boundary =
+          _screenshotKey.currentContext?.findRenderObject()
+              as RenderRepaintBoundary?;
       if (boundary == null) return;
-      final image = await boundary.toImage(pixelRatio: MediaQuery.of(context).devicePixelRatio);
+      final image = await boundary.toImage(
+        pixelRatio: MediaQuery.of(context).devicePixelRatio,
+      );
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return;
       final bytes = byteData.buffer.asUint8List();
       final dir = Directory.systemTemp;
-      final file = File('${dir.path}/seelo_${DateTime.now().millisecondsSinceEpoch}.png');
+      final file = File(
+        '${dir.path}/seelo_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
       await file.writeAsBytes(bytes);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('Screenshot saved'),
-          action: SnackBarAction(label: 'OK', onPressed: () {}),
-          duration: const Duration(seconds: 3),
-        ));
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(file.path)],
+            text: 'Seelo Preview Screenshot',
+          ),
+        );
       }
     } catch (_) {}
   }
 
-  Widget _modeChip(String title, String subtitle, DisplayMode mode, DisplayMode current, void Function(void Function()) setInner) {
+  Widget _modeChip(
+    String title,
+    String subtitle,
+    DisplayMode mode,
+    DisplayMode current,
+    void Function(void Function()) setInner,
+    void Function(DisplayMode) onChanged,
+  ) {
     final active = mode == current;
     return InkWell(
       onTap: () {
-        setInner(() {});
+        onChanged(mode);
         setState(() => _displayMode = mode);
       },
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: active ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
+          color: active
+              ? Colors.white.withValues(alpha: 0.1)
+              : Colors.transparent,
           border: Border.all(color: active ? Colors.white : AppPalette.border),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
           children: [
             Icon(
-              mode == DisplayMode.fitToScreen ? Icons.fit_screen : Icons.one_x_mobiledata,
+              mode == DisplayMode.fitToScreen
+                  ? Icons.fit_screen
+                  : Icons.one_x_mobiledata,
               color: active ? Colors.white : AppPalette.dim,
               size: 20,
             ),
@@ -1942,15 +2780,29 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: TextStyle(color: active ? Colors.white : AppPalette.text, fontWeight: FontWeight.w600, fontSize: 13)),
-                  Text(subtitle, style: TextStyle(color: AppPalette.dim, fontSize: 11)),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: active ? Colors.white : AppPalette.text,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(color: AppPalette.dim, fontSize: 11),
+                  ),
                 ],
               ),
             ),
             if (active)
               Container(
-                width: 10, height: 10,
-                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
               ),
           ],
         ),
@@ -1958,19 +2810,37 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _settingToggle(String title, String sub, bool val, ValueChanged<bool> onChanged) {
+  Widget _settingToggle(
+    String title,
+    String sub,
+    bool val,
+    ValueChanged<bool> onChanged,
+  ) {
     return Row(
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(color: AppPalette.text, fontWeight: FontWeight.w600)),
-              Text(sub, style: const TextStyle(color: AppPalette.dim, fontSize: 12)),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: AppPalette.text,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                sub,
+                style: const TextStyle(color: AppPalette.dim, fontSize: 12),
+              ),
             ],
           ),
         ),
-        Switch(value: val, onChanged: onChanged, activeThumbColor: Colors.white),
+        Switch(
+          value: val,
+          onChanged: onChanged,
+          activeThumbColor: Colors.white,
+        ),
       ],
     );
   }
@@ -1991,8 +2861,13 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
 
         return AlertDialog(
           backgroundColor: AppPalette.card,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Layer Inspector', style: TextStyle(color: AppPalette.text, fontSize: 16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            'Layer Inspector',
+            style: TextStyle(color: AppPalette.text, fontSize: 16),
+          ),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2004,20 +2879,31 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                 _inspectorRow('Size', '${fontSize}px'),
                 _inspectorRow('Color', color),
                 _inspectorRow('Align', textAlign),
-                if (letterSpacing != 0) _inspectorRow('Letter Spacing', '${letterSpacing}px'),
-                if (lineHeight != 0) _inspectorRow('Line Height', '${lineHeight}px'),
+                if (letterSpacing != 0)
+                  _inspectorRow('Letter Spacing', '${letterSpacing}px'),
+                if (lineHeight != 0)
+                  _inspectorRow('Line Height', '${lineHeight}px'),
                 _inspectorRow('Opacity', '${(opacity * 100).round()}%'),
                 if (layer['x'] != null && layer['y'] != null)
-                  _inspectorRow('Position', 'x:${(layer['x'] as num).round()} y:${(layer['y'] as num).round()}'),
+                  _inspectorRow(
+                    'Position',
+                    'x:${(layer['x'] as num).round()} y:${(layer['y'] as num).round()}',
+                  ),
                 if (layer['width'] != null && layer['height'] != null)
-                  _inspectorRow('Size', '${(layer['width'] as num).round()}\u00D7${(layer['height'] as num).round()}'),
+                  _inspectorRow(
+                    'Size',
+                    '${(layer['width'] as num).round()}\u00D7${(layer['height'] as num).round()}',
+                  ),
               ],
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Close', style: TextStyle(color: Colors.white70)),
+              child: const Text(
+                'Close',
+                style: TextStyle(color: Colors.white70),
+              ),
             ),
           ],
         );
@@ -2033,24 +2919,35 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
         children: [
           SizedBox(
             width: 90,
-            child: Text(label, style: const TextStyle(color: AppPalette.dim, fontSize: 12)),
+            child: Text(
+              label,
+              style: const TextStyle(color: AppPalette.dim, fontSize: 12),
+            ),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(color: AppPalette.text, fontSize: 12)),
+            child: Text(
+              value,
+              style: const TextStyle(color: AppPalette.text, fontSize: 12),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Map<String, dynamic>? _hitTestTextLayer(Offset imageLocalPos, FrameMetadata meta) {
+  Map<String, dynamic>? _hitTestTextLayer(
+    Offset imageLocalPos,
+    FrameMetadata meta,
+  ) {
     for (final layer in meta.textLayers.reversed) {
       final lx = (layer['x'] as num?)?.toDouble() ?? 0;
       final ly = (layer['y'] as num?)?.toDouble() ?? 0;
       final lw = (layer['width'] as num?)?.toDouble() ?? 0;
       final lh = (layer['height'] as num?)?.toDouble() ?? 0;
-      if (lx <= imageLocalPos.dx && imageLocalPos.dx <= lx + lw &&
-          ly <= imageLocalPos.dy && imageLocalPos.dy <= ly + lh) {
+      if (lx <= imageLocalPos.dx &&
+          imageLocalPos.dx <= lx + lw &&
+          ly <= imageLocalPos.dy &&
+          imageLocalPos.dy <= ly + lh) {
         if ((layer['characters']?.toString() ?? '').trim().isNotEmpty) {
           return layer;
         }
@@ -2059,7 +2956,11 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     return null;
   }
 
-  Widget _buildIssueOverlay(FrameMetadata meta, double renderW, double renderH) {
+  Widget _buildIssueOverlay(
+    FrameMetadata meta,
+    double renderW,
+    double renderH,
+  ) {
     final issues = widget.controller.issues.value;
     if (issues.isEmpty) return const SizedBox.shrink();
     final scaleX = renderW / meta.frameWidth;
@@ -2069,8 +2970,12 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
       builder: (_, list, _) {
         return Stack(
           children: list.map((issue) {
-            final color = issue.type == 'overflow' ? const Color(0x44FF4757) : const Color(0x44FFA502);
-            final borderColor = issue.type == 'overflow' ? const Color(0xAAFF4757) : const Color(0xAAFFA502);
+            final color = issue.type == 'overflow'
+                ? const Color(0x44FF4757)
+                : const Color(0x44FFA502);
+            final borderColor = issue.type == 'overflow'
+                ? const Color(0xAAFF4757)
+                : const Color(0xAAFFA502);
             return Positioned(
               left: issue.x * scaleX,
               top: issue.y * scaleY,
@@ -2090,31 +2995,76 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildSafeAreaOverlay(FrameMetadata meta, double renderW, double renderH) {
-    const topInset = 0.08;  // 8% of frame height for top safe area
-    const bottomInset = 0.05; // 5% of frame height for bottom safe area
+  Widget _buildSafeAreaOverlay(
+    FrameMetadata meta,
+    double renderW,
+    double renderH,
+  ) {
+    final isDesktop = _selectedPreset.screenWidth >= 1440;
+    final isTablet = _selectedPreset.screenWidth >= 820 && !isDesktop;
+    double topInset, bottomInset;
+    if (isDesktop) {
+      topInset = 0.0;
+      bottomInset = 0.0;
+    } else if (isTablet) {
+      topInset = 0.02;
+      bottomInset = 0.02;
+    } else {
+      // Mobile: notch + home indicator
+      topInset = 0.06;
+      bottomInset = 0.04;
+    }
     final sh = renderH;
     final sw = renderW;
+    if (isDesktop) return const SizedBox.shrink();
     return Stack(
       children: [
         Positioned(
-          top: 0, left: 0, width: sw, height: sh * topInset,
+          top: 0,
+          left: 0,
+          width: sw,
+          height: sh * topInset,
           child: Container(
             decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: const Color(0xAA22C55E), width: 2)),
+              border: Border(
+                bottom: BorderSide(color: const Color(0xAA22C55E), width: 2),
+              ),
               color: const Color(0x2222C55E),
             ),
-            child: const Center(child: Text('SAFE', style: TextStyle(color: Color(0xAA22C55E), fontSize: 9, fontWeight: FontWeight.w700))),
+            child: const Center(
+              child: Text(
+                'SAFE',
+                style: TextStyle(
+                  color: Color(0xAA22C55E),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ),
         ),
         Positioned(
-          bottom: 0, left: 0, width: sw, height: sh * bottomInset,
+          bottom: 0,
+          left: 0,
+          width: sw,
+          height: sh * bottomInset,
           child: Container(
             decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: const Color(0xAA22C55E), width: 2)),
+              border: Border(
+                top: BorderSide(color: const Color(0xAA22C55E), width: 2),
+              ),
               color: const Color(0x2222C55E),
             ),
-            child: const Center(child: Text('SAFE', style: TextStyle(color: Color(0xAA22C55E), fontSize: 9, fontWeight: FontWeight.w700))),
+            child: const Center(
+              child: Text(
+                'SAFE',
+                style: TextStyle(
+                  color: Color(0xAA22C55E),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ),
         ),
       ],
@@ -2123,7 +3073,8 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
 
   Widget _buildGridOverlay(FrameMetadata meta, double renderW, double renderH) {
     const cellSize = 8; // 8x8 px grid cells in design coordinates
-    if (meta.frameWidth <= 0 || meta.frameHeight <= 0) return const SizedBox.shrink();
+    if (meta.frameWidth <= 0 || meta.frameHeight <= 0)
+      return const SizedBox.shrink();
     final cols = (meta.frameWidth / cellSize).ceil();
     final rows = (meta.frameHeight / cellSize).ceil();
     final scaleX = renderW / meta.frameWidth;
@@ -2143,42 +3094,67 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
   }
 
   Widget _buildDeviceFrame(FrameMetadata meta, double renderW, double renderH) {
+    final isTablet = _selectedPreset.screenWidth >= 820;
+    final isDesktop = _selectedPreset.screenWidth >= 1440;
+    final cornerRadius = isTablet ? 32.0 : isDesktop ? 8.0 : 24.0;
+    final notchWidth = isDesktop ? 0.0 : isTablet ? 0.0 : 80.0;
+    final notchHeight = isDesktop ? 0.0 : isTablet ? 0.0 : 6.0;
+    final notchTop = isDesktop ? 0.0 : isTablet ? 0.0 : 0.0;
     return IgnorePointer(
       child: Stack(
         children: [
-          // Rounded corners (dark bars at corners)
+          // Rounded corners
           Positioned.fill(
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(cornerRadius),
               child: Container(
                 decoration: BoxDecoration(
                   border: Border.all(color: const Color(0x88FFFFFF), width: 2),
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(cornerRadius),
                 ),
               ),
             ),
           ),
-          // Notch indicator at top center
-          Positioned(
-            top: 0, left: renderW / 2 - 40, width: 80, height: 6,
-            child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xCC1C1C1E),
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(3)),
+          // Notch indicator (mobile only)
+          if (notchWidth > 0)
+            Positioned(
+              top: notchTop,
+              left: renderW / 2 - notchWidth / 2,
+              width: notchWidth,
+              height: notchHeight,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xCC1C1C1E),
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(3),
+                  ),
+                ),
               ),
             ),
-          ),
-          // Bottom home indicator (small pill)
-          Positioned(
-            bottom: 4, left: renderW / 2 - 25, width: 50, height: 4,
-            child: Container(decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(2))),
-          ),
+          // Bottom home indicator (mobile only)
+          if (!isDesktop)
+            Positioned(
+              bottom: isTablet ? 6 : 4,
+              left: renderW / 2 - 25,
+              width: 50,
+              height: isTablet ? 5 : 4,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildMeasurementOverlay(FrameMetadata meta, double renderW, double renderH) {
+  Widget _buildMeasurementOverlay(
+    FrameMetadata meta,
+    double renderW,
+    double renderH,
+  ) {
     if (_measurePoints.length < 2) {
       if (_measurePoints.length == 1) {
         return CustomPaint(
@@ -2190,8 +3166,14 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     }
     final scaleX = renderW / meta.frameWidth;
     final scaleY = renderH / meta.frameHeight;
-    final p0 = Offset(_measurePoints[0].dx * scaleX, _measurePoints[0].dy * scaleY);
-    final p1 = Offset(_measurePoints[1].dx * scaleX, _measurePoints[1].dy * scaleY);
+    final p0 = Offset(
+      _measurePoints[0].dx * scaleX,
+      _measurePoints[0].dy * scaleY,
+    );
+    final p1 = Offset(
+      _measurePoints[1].dx * scaleX,
+      _measurePoints[1].dy * scaleY,
+    );
     final dist = (_measurePoints[0] - _measurePoints[1]).distance;
     return Stack(
       children: [
@@ -2204,8 +3186,19 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
           top: (p0.dy + p1.dy) / 2 - 10,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.white24)),
-            child: Text('${dist.toStringAsFixed(1)}px', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Text(
+              '${dist.toStringAsFixed(1)}px',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ),
         if (_measurePoints.length == 2)
@@ -2215,16 +3208,96 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
             right: 0,
             child: Center(
               child: GestureDetector(
-                onTap: () => setState(() { _measurePoints.clear(); _measureMode = false; }),
+                onTap: () => setState(() {
+                  _measurePoints.clear();
+                  _measureMode = false;
+                }),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white24)),
-                  child: const Text('Clear Measurement', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: const Text(
+                    'Clear Measurement',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
                 ),
               ),
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildOverlayCompareSlider(double renderW, String previousImageData) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalW = constraints.maxWidth > 0 ? constraints.maxWidth : renderW;
+        return GestureDetector(
+          onHorizontalDragUpdate: (details) {
+            setState(() {
+              _overlayCompareSliderPos = (details.localPosition.dx / totalW).clamp(0.05, 0.95);
+            });
+          },
+          child: SizedBox(
+            width: totalW,
+            child: Stack(
+              children: [
+                ClipRect(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: _overlayCompareSliderPos,
+                    child: Opacity(
+                      opacity: 0.5,
+                      child: Image.memory(
+                        base64Decode(previousImageData.split(',').last),
+                        width: totalW,
+                        fit: BoxFit.fitWidth,
+                        filterQuality: FilterQuality.high,
+                        gaplessPlayback: true,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: totalW * _overlayCompareSliderPos - 12,
+                  top: 0,
+                  bottom: 0,
+                  width: 24,
+                  child: GestureDetector(
+                    onHorizontalDragUpdate: (details) {
+                      setState(() {
+                        _overlayCompareSliderPos = ((totalW * _overlayCompareSliderPos + details.delta.dx) / totalW).clamp(0.05, 0.95);
+                      });
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 8),
+                        ],
+                      ),
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.chevron_left, size: 14, color: Colors.black87),
+                          Icon(Icons.chevron_right, size: 14, color: Colors.black87),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -2284,7 +3357,10 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                   decodedImage = base64Decode(imageData.split(',').last);
                 } catch (_) {
                   content = const Center(
-                    child: Text('Failed to decode image', style: TextStyle(color: AppPalette.dim)),
+                    child: Text(
+                      'Failed to decode image',
+                      style: TextStyle(color: AppPalette.dim),
+                    ),
                   );
                   return const SizedBox.shrink();
                 }
@@ -2292,35 +3368,50 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                 final double imageNaturalWidth = meta.imagePixelsWidth;
                 final double imageNaturalHeight = meta.imagePixelsHeight;
 
-                if (_displayMode == DisplayMode.pixelPerfect) {
-                  // Pixel-perfect: 1 image pixel = 1 device pixel
-                  // Convert to logical pixels by dividing by devicePixelRatio
-                  final dpr = MediaQuery.of(context).devicePixelRatio;
-                  final double renderWidth = imageNaturalWidth / dpr;
-                  final double renderHeight = imageNaturalHeight / dpr;
+                if (_displayMode == DisplayMode.pixelPerfect &&
+                    imageNaturalWidth > 0 &&
+                    imageNaturalHeight > 0) {
+                  // Exact-size: use Figma frame logical dimensions directly
+                  final double renderWidth = meta.frameWidth;
+                  final double renderHeight = meta.frameHeight;
 
                   content = GestureDetector(
                     onTapUp: (details) {
                       if (_measureMode) {
-                        final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+                        final RenderBox? box =
+                            _imageKey.currentContext?.findRenderObject()
+                                as RenderBox?;
                         if (box == null) return;
-                        final localPos = box.globalToLocal(details.globalPosition);
+                        final localPos = box.globalToLocal(
+                          details.globalPosition,
+                        );
                         final scaleX = meta.frameWidth / renderWidth;
                         final scaleY = meta.frameHeight / renderHeight;
-                        final f = Offset(localPos.dx * scaleX, localPos.dy * scaleY);
+                        final f = Offset(
+                          localPos.dx * scaleX,
+                          localPos.dy * scaleY,
+                        );
                         setState(() {
                           _measurePoints = [..._measurePoints, f];
-                          if (_measurePoints.length > 2) _measurePoints = _measurePoints.sublist(1);
+                          if (_measurePoints.length > 2)
+                            _measurePoints = _measurePoints.sublist(1);
                         });
                         return;
                       }
                       // Convert tap position to frame-local coordinates
-                      final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+                      final RenderBox? box =
+                          _imageKey.currentContext?.findRenderObject()
+                              as RenderBox?;
                       if (box == null) return;
-                      final localPos = box.globalToLocal(details.globalPosition);
+                      final localPos = box.globalToLocal(
+                        details.globalPosition,
+                      );
                       final scaleX = meta.frameWidth / renderWidth;
                       final scaleY = meta.frameHeight / renderHeight;
-                      final frameLocalPos = Offset(localPos.dx * scaleX, localPos.dy * scaleY);
+                      final frameLocalPos = Offset(
+                        localPos.dx * scaleX,
+                        localPos.dy * scaleY,
+                      );
 
                       final hitLayer = _hitTestTextLayer(frameLocalPos, meta);
                       if (hitLayer != null) {
@@ -2336,11 +3427,19 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         color: const Color(0xFF0C0C0C),
                         child: Stack(
                           children: [
-                            if (PremiumManager.hasAccess(PremiumFeature.overlayMode) && _overlayMode && widget.controller.previousImageData != null)
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.overlayMode,
+                                ) &&
+                                _overlayMode &&
+                                widget.controller.previousImageData != null)
                               Opacity(
                                 opacity: _overlayOpacity,
                                 child: Image.memory(
-                                  base64Decode(widget.controller.previousImageData!.split(',').last),
+                                  base64Decode(
+                                    widget.controller.previousImageData!
+                                        .split(',')
+                                        .last,
+                                  ),
                                   width: renderWidth,
                                   height: renderHeight,
                                   fit: BoxFit.fill,
@@ -2357,41 +3456,47 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               filterQuality: FilterQuality.high,
                               gaplessPlayback: true,
                             ),
-                            // Frame info badge
-                            Positioned(
-                              top: 12,
-                              left: 12,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.7),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  '${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}px (${meta.exportScale.toInt()}\u00D7)',
-                                  style: const TextStyle(color: Colors.white70, fontSize: 10),
-                                ),
+                            if (_showIssues)
+                              _buildIssueOverlay(
+                                meta,
+                                renderWidth,
+                                renderHeight,
                               ),
-                            ),
-                            // Hint for inspector
-                            Positioned(
-                              top: 12,
-                              right: 12,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.7),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: const Text('Tap text to inspect', style: TextStyle(color: Colors.white38, fontSize: 10)),
+                            if (_showSafeArea)
+                              _buildSafeAreaOverlay(
+                                meta,
+                                renderWidth,
+                                renderHeight,
                               ),
-                            ),
-                            if (_showIssues) _buildIssueOverlay(meta, renderWidth, renderHeight),
-                            if (_showSafeArea) _buildSafeAreaOverlay(meta, renderWidth, renderHeight),
-                            if (_showGrid) _buildGridOverlay(meta, renderWidth, renderHeight),
-                            if (PremiumManager.hasAccess(PremiumFeature.rulers) && _showRulers) _buildRulers(meta, renderWidth, renderHeight),
-                            if (PremiumManager.hasAccess(PremiumFeature.measurement) && _measureMode) _buildMeasurementOverlay(meta, renderWidth, renderHeight),
-                            if (PremiumManager.hasAccess(PremiumFeature.deviceFrame) && _showDeviceFrame) _buildDeviceFrame(meta, renderWidth, renderHeight),
+                            if (_showGrid)
+                              _buildGridOverlay(
+                                meta,
+                                renderWidth,
+                                renderHeight,
+                              ),
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.rulers,
+                                ) &&
+                                _showRulers)
+                              _buildRulers(meta, renderWidth, renderHeight),
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.measurement,
+                                ) &&
+                                _measureMode)
+                              _buildMeasurementOverlay(
+                                meta,
+                                renderWidth,
+                                renderHeight,
+                              ),
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.deviceFrame,
+                                ) &&
+                                _showDeviceFrame)
+                              _buildDeviceFrame(
+                                meta,
+                                renderWidth,
+                                renderHeight,
+                              ),
                           ],
                         ),
                       ),
@@ -2400,26 +3505,49 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                 } else {
                   content = GestureDetector(
                     onTapUp: (details) {
-                      if (PremiumManager.hasAccess(PremiumFeature.measurement) && _measureMode) {
-                        final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+                      if (PremiumManager.hasAccess(
+                            PremiumFeature.measurement,
+                          ) &&
+                          _measureMode) {
+                        final RenderBox? box =
+                            _imageKey.currentContext?.findRenderObject()
+                                as RenderBox?;
                         if (box == null) return;
-                        final localPos = box.globalToLocal(details.globalPosition);
+                        final localPos = box.globalToLocal(
+                          details.globalPosition,
+                        );
                         final scaleX = meta.frameWidth / screenWidth;
-                        final scaleY = meta.frameHeight / (screenWidth * (meta.frameHeight / meta.frameWidth));
-                        final f = Offset(localPos.dx * scaleX, localPos.dy * scaleY);
+                        final scaleY =
+                            meta.frameHeight /
+                            (screenWidth *
+                                (meta.frameHeight / meta.frameWidth));
+                        final f = Offset(
+                          localPos.dx * scaleX,
+                          localPos.dy * scaleY,
+                        );
                         setState(() {
                           _measurePoints = [..._measurePoints, f];
-                          if (_measurePoints.length > 2) _measurePoints = _measurePoints.sublist(1);
+                          if (_measurePoints.length > 2)
+                            _measurePoints = _measurePoints.sublist(1);
                         });
                         return;
                       }
                       if (meta.textLayers.isEmpty) return;
-                      final RenderBox? box = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+                      final RenderBox? box =
+                          _imageKey.currentContext?.findRenderObject()
+                              as RenderBox?;
                       if (box == null) return;
-                      final localPos = box.globalToLocal(details.globalPosition);
+                      final localPos = box.globalToLocal(
+                        details.globalPosition,
+                      );
                       final scaleX = meta.frameWidth / screenWidth;
-                      final scaleY = meta.frameHeight / (screenWidth * (meta.frameHeight / meta.frameWidth));
-                      final frameLocalPos = Offset(localPos.dx * scaleX, localPos.dy * scaleY);
+                      final scaleY =
+                          meta.frameHeight /
+                          (screenWidth * (meta.frameHeight / meta.frameWidth));
+                      final frameLocalPos = Offset(
+                        localPos.dx * scaleX,
+                        localPos.dy * scaleY,
+                      );
 
                       final hitLayer = _hitTestTextLayer(frameLocalPos, meta);
                       if (hitLayer != null) {
@@ -2435,11 +3563,29 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         physics: const ClampingScrollPhysics(),
                         child: Stack(
                           children: [
-                            if (PremiumManager.hasAccess(PremiumFeature.overlayMode) && _overlayMode && widget.controller.previousImageData != null)
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.overlayMode,
+                                ) &&
+                                _overlayMode &&
+                                widget.controller.previousImageData != null &&
+                                _overlayCompare)
+                              _buildOverlayCompareSlider(
+                                screenWidth,
+                                widget.controller.previousImageData!,
+                              )
+                            else if (PremiumManager.hasAccess(
+                                  PremiumFeature.overlayMode,
+                                ) &&
+                                _overlayMode &&
+                                widget.controller.previousImageData != null)
                               Opacity(
                                 opacity: _overlayOpacity,
                                 child: Image.memory(
-                                  base64Decode(widget.controller.previousImageData!.split(',').last),
+                                  base64Decode(
+                                    widget.controller.previousImageData!
+                                        .split(',')
+                                        .last,
+                                  ),
                                   width: screenWidth,
                                   fit: BoxFit.fitWidth,
                                   filterQuality: FilterQuality.high,
@@ -2454,12 +3600,57 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               filterQuality: FilterQuality.high,
                               gaplessPlayback: true,
                             ),
-                            if (_showIssues) _buildIssueOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (_showSafeArea) _buildSafeAreaOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (_showGrid) _buildGridOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (PremiumManager.hasAccess(PremiumFeature.rulers) && _showRulers) _buildRulers(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (PremiumManager.hasAccess(PremiumFeature.measurement) && _measureMode) _buildMeasurementOverlay(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
-                            if (PremiumManager.hasAccess(PremiumFeature.deviceFrame) && _showDeviceFrame) _buildDeviceFrame(meta, screenWidth, screenWidth * (meta.frameHeight / meta.frameWidth)),
+                            if (_showIssues)
+                              _buildIssueOverlay(
+                                meta,
+                                screenWidth,
+                                screenWidth *
+                                    (meta.frameHeight / meta.frameWidth),
+                              ),
+                            if (_showSafeArea)
+                              _buildSafeAreaOverlay(
+                                meta,
+                                screenWidth,
+                                screenWidth *
+                                    (meta.frameHeight / meta.frameWidth),
+                              ),
+                            if (_showGrid)
+                              _buildGridOverlay(
+                                meta,
+                                screenWidth,
+                                screenWidth *
+                                    (meta.frameHeight / meta.frameWidth),
+                              ),
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.rulers,
+                                ) &&
+                                _showRulers)
+                              _buildRulers(
+                                meta,
+                                screenWidth,
+                                screenWidth *
+                                    (meta.frameHeight / meta.frameWidth),
+                              ),
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.measurement,
+                                ) &&
+                                _measureMode)
+                              _buildMeasurementOverlay(
+                                meta,
+                                screenWidth,
+                                screenWidth *
+                                    (meta.frameHeight / meta.frameWidth),
+                              ),
+                            if (PremiumManager.hasAccess(
+                                  PremiumFeature.deviceFrame,
+                                ) &&
+                                _showDeviceFrame)
+                              _buildDeviceFrame(
+                                meta,
+                                screenWidth,
+                                screenWidth *
+                                    (meta.frameHeight / meta.frameWidth),
+                              ),
                           ],
                         ),
                       ),
@@ -2488,35 +3679,74 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                       key: _screenshotKey,
                       child: Container(
                         color: Colors.black,
-                        child: _showSystemUi ? SafeArea(child: content) : content,
+                        child: _showSystemUi
+                            ? SafeArea(child: content)
+                            : content,
                       ),
                     ),
                   ),
                   // Top-left badges: frame info + viewer count
                   if (imageData != null && meta != null)
-                    Positioned(
-                      top: 8,
-                      left: 8,
+                    AnimatedOpacity(
+                      opacity: _showToolbar ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 250),
+                      child: Positioned(
+                        top: 8,
+                        left: 8,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           GestureDetector(
                             onTap: _toggleToolbar,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(6)),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.6),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text('${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                  Text(
+                                    '${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}',
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 10,
+                                    ),
+                                  ),
                                   const SizedBox(width: 6),
-                                  Text(_selectedPreset.name, style: const TextStyle(color: Colors.white38, fontSize: 9)),
+                                  Text(
+                                    _selectedPreset.name,
+                                    style: const TextStyle(
+                                      color: Colors.white38,
+                                      fontSize: 9,
+                                    ),
+                                  ),
                                   if (_isLandscape) ...[
                                     const SizedBox(width: 6),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                      decoration: BoxDecoration(color: const Color(0x33FFA502), borderRadius: BorderRadius.circular(3), border: Border.all(color: const Color(0x55FFA502))),
-                                      child: const Text('LAND', style: TextStyle(color: Color(0xCCFFA502), fontSize: 8, fontWeight: FontWeight.w700)),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 5,
+                                        vertical: 1,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0x33FFA502),
+                                        borderRadius: BorderRadius.circular(3),
+                                        border: Border.all(
+                                          color: const Color(0x55FFA502),
+                                        ),
+                                      ),
+                                      child: const Text(
+                                        'LAND',
+                                        style: TextStyle(
+                                          color: Color(0xCCFFA502),
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ],
@@ -2531,14 +3761,31 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                 return Padding(
                                   padding: const EdgeInsets.only(top: 4),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(color: const Color(0x9922C55E), borderRadius: BorderRadius.circular(6)),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0x9922C55E),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const Icon(Icons.people_alt_rounded, size: 12, color: Colors.white),
+                                        const Icon(
+                                          Icons.people_alt_rounded,
+                                          size: 12,
+                                          color: Colors.white,
+                                        ),
                                         const SizedBox(width: 4),
-                                        Text('$count', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                                        Text(
+                                          '$count',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -2548,6 +3795,7 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                         ],
                       ),
                     ),
+                  ),
                   // Issue badge + suggestions
                   if (imageData != null && meta != null)
                     Positioned(
@@ -2561,19 +3809,37 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               GestureDetector(
-                                onTap: () => setState(() => _showIssues = !_showIssues),
+                                onTap: () =>
+                                    setState(() => _showIssues = !_showIssues),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 7,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: issues.any((i) => i.type == 'overflow') ? const Color(0xCCFF4757) : const Color(0xCCFFA502),
+                                    color:
+                                        issues.any((i) => i.type == 'overflow')
+                                        ? const Color(0xCCFF4757)
+                                        : const Color(0xCCFFA502),
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.white),
+                                      const Icon(
+                                        Icons.warning_amber_rounded,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
                                       const SizedBox(width: 6),
-                                      Text('${issues.length}', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+                                      Text(
+                                        '${issues.length}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -2582,7 +3848,10 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               GestureDetector(
                                 onTap: () => _showSuggestions(issues),
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 7,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: Colors.black.withValues(alpha: 0.7),
                                     borderRadius: BorderRadius.circular(20),
@@ -2591,9 +3860,19 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                                   child: const Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.auto_awesome, size: 14, color: Color(0xAA22C55E)),
+                                      Icon(
+                                        Icons.auto_awesome,
+                                        size: 14,
+                                        color: Color(0xAA22C55E),
+                                      ),
                                       SizedBox(width: 6),
-                                      Text('Suggest', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                                      Text(
+                                        'Suggest',
+                                        style: TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 12,
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -2604,29 +3883,63 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                       ),
                     ),
                   // Connection quality indicator (top right)
-                  Positioned(
-                    top: 8,
-                    right: 8,
+                  AnimatedOpacity(
+                    opacity: _showToolbar ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Positioned(
+                      top: 8,
+                      right: 8,
                     child: ValueListenableBuilder<ConnectionQuality>(
                       valueListenable: widget.controller.connectionQuality,
                       builder: (_, q, _) {
                         final (color, label) = switch (q) {
-                          ConnectionQuality.good => (const Color(0xFF22C55E), 'Good'),
-                          ConnectionQuality.fair => (const Color(0xFFEAB308), 'Fair'),
-                          ConnectionQuality.poor => (const Color(0xFFEF4444), 'Poor'),
-                          ConnectionQuality.disconnected => (AppPalette.dim, 'Disconnected'),
+                          ConnectionQuality.good => (
+                            const Color(0xFF22C55E),
+                            'Good',
+                          ),
+                          ConnectionQuality.fair => (
+                            const Color(0xFFEAB308),
+                            'Fair',
+                          ),
+                          ConnectionQuality.poor => (
+                            const Color(0xFFEF4444),
+                            'Poor',
+                          ),
+                          ConnectionQuality.disconnected => (
+                            AppPalette.dim,
+                            'Disconnected',
+                          ),
                         };
                         return GestureDetector(
                           onTap: _toggleToolbar,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                            decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(6)),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+                                Container(
+                                  width: 6,
+                                  height: 6,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
                                 const SizedBox(width: 4),
-                                Text(label, style: const TextStyle(color: Colors.white54, fontSize: 9)),
+                                Text(
+                                  label,
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 9,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -2634,13 +3947,19 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                       },
                     ),
                   ),
+                  ),
                   // Reconnecting overlay
                   ValueListenableBuilder<ConnectionQuality>(
                     valueListenable: widget.controller.connectionQuality,
                     builder: (_, q, _) {
-                      if (q == ConnectionQuality.good || q == ConnectionQuality.fair) return const SizedBox.shrink();
+                      if (q == ConnectionQuality.good ||
+                          q == ConnectionQuality.fair)
+                        return const SizedBox.shrink();
                       return Positioned(
-                        top: 0, left: 0, right: 0, bottom: 0,
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
                         child: GestureDetector(
                           onTap: _toggleToolbar,
                           child: Container(
@@ -2649,17 +3968,36 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70)),
+                                  const SizedBox(
+                                    width: 32,
+                                    height: 32,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
                                   const SizedBox(height: 12),
                                   Text(
-                                    q == ConnectionQuality.disconnected ? 'Reconnecting...' : 'Weak connection',
-                                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                    q == ConnectionQuality.disconnected
+                                        ? 'Reconnecting...'
+                                        : 'Weak connection',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 14,
+                                    ),
                                   ),
                                   ValueListenableBuilder<int>(
-                                    valueListenable: widget.controller.latencyMs,
+                                    valueListenable:
+                                        widget.controller.latencyMs,
                                     builder: (_, lat, _) => lat > 0
-                                      ? Text('${lat}ms latency', style: const TextStyle(color: Colors.white38, fontSize: 12))
-                                      : const SizedBox.shrink(),
+                                        ? Text(
+                                            '${lat}ms latency',
+                                            style: const TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 12,
+                                            ),
+                                          )
+                                        : const SizedBox.shrink(),
                                   ),
                                 ],
                               ),
@@ -2681,94 +4019,286 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
                           child: Padding(
                             padding: const EdgeInsets.only(bottom: 40),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.black.withValues(alpha: 0.8),
                                 borderRadius: BorderRadius.circular(99),
-                                border: Border.all(color: Colors.white24, width: 0.5),
+                                border: Border.all(
+                                  color: Colors.white24,
+                                  width: 0.5,
+                                ),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   // Quality dot
                                   ValueListenableBuilder<ConnectionQuality>(
-                                    valueListenable: widget.controller.connectionQuality,
-                    builder: (_, q, _) {
-                                      final c = q == ConnectionQuality.good ? const Color(0xFF22C55E)
-                                        : q == ConnectionQuality.fair ? const Color(0xFFEAB308)
-                                        : q == ConnectionQuality.poor ? const Color(0xFFEF4444)
-                                        : AppPalette.dim;
+                                    valueListenable:
+                                        widget.controller.connectionQuality,
+                                    builder: (_, q, _) {
+                                      final c = q == ConnectionQuality.good
+                                          ? const Color(0xFF22C55E)
+                                          : q == ConnectionQuality.fair
+                                          ? const Color(0xFFEAB308)
+                                          : q == ConnectionQuality.poor
+                                          ? const Color(0xFFEF4444)
+                                          : AppPalette.dim;
                                       return Container(
-                                        width: 8, height: 8, margin: const EdgeInsets.symmetric(horizontal: 8),
-                                        decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+                                        width: 8,
+                                        height: 8,
+                                        margin: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: c,
+                                          shape: BoxShape.circle,
+                                        ),
                                       );
                                     },
                                   ),
                                   if (widget.controller.serverLabel == 'Cloud')
                                     ValueListenableBuilder<int>(
-                                      valueListenable: widget.controller.viewerCount,
+                                      valueListenable:
+                                          widget.controller.viewerCount,
                                       builder: (_, count, _) {
-                                        final label = count > 1 ? '$count viewers' : count == 1 ? '1 viewer' : '';
-                                        if (label.isEmpty) return const SizedBox.shrink();
+                                        final label = count > 1
+                                            ? '$count viewers'
+                                            : count == 1
+                                            ? '1 viewer'
+                                            : '';
+                                        if (label.isEmpty)
+                                          return const SizedBox.shrink();
                                         return Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                          ),
                                           child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
                                             decoration: BoxDecoration(
                                               color: const Color(0x3322C55E),
-                                              borderRadius: BorderRadius.circular(12),
-                                              border: Border.all(color: const Color(0x5522C55E)),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              border: Border.all(
+                                                color: const Color(0x5522C55E),
+                                              ),
                                             ),
-                                            child: Text(label, style: const TextStyle(color: Color(0xCC22C55E), fontSize: 10, fontWeight: FontWeight.w600)),
+                                            child: Text(
+                                              label,
+                                              style: const TextStyle(
+                                                color: Color(0xCC22C55E),
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
                                           ),
                                         );
                                       },
                                     ),
-                                  _toolBtn(Icons.close, () => Navigator.of(context).pop()),
+                                  _toolBtn(
+                                    Icons.close,
+                                    () => Navigator.of(context).pop(),
+                                  ),
                                   const SizedBox(width: 8),
-                                  _toolBtn(Icons.refresh, () { widget.controller.requestManualSync(); _startToolbarTimer(); }),
-                                  const SizedBox(width: 8),
-                                  _toolBtn(_displayMode == DisplayMode.pixelPerfect ? Icons.fit_screen : Icons.one_x_mobiledata, () {
-                                    setState(() => _displayMode = _displayMode == DisplayMode.fitToScreen ? DisplayMode.pixelPerfect : DisplayMode.fitToScreen);
-                                    _transformationController.value = Matrix4.identity();
+                                  _toolBtn(Icons.refresh, () {
+                                    widget.controller.requestManualSync();
                                     _startToolbarTimer();
                                   }),
                                   const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(PremiumFeature.landscapeMode))
-                                    _toolBtn(_isLandscape ? Icons.screen_rotation : Icons.rotate_left, () {
-                                      setState(() => _isLandscape = !_isLandscape);
+                                  _toolBtn(
+                                    _displayMode == DisplayMode.pixelPerfect
+                                        ? Icons.fit_screen
+                                        : Icons.one_x_mobiledata,
+                                    () {
+                                      setState(
+                                        () => _displayMode =
+                                            _displayMode ==
+                                                DisplayMode.fitToScreen
+                                            ? DisplayMode.pixelPerfect
+                                            : DisplayMode.fitToScreen,
+                                      );
+                                      _transformationController.value =
+                                          Matrix4.identity();
+                                      _startToolbarTimer();
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  if (PremiumManager.hasAccess(
+                                    PremiumFeature.landscapeMode,
+                                  ))
+                                    _toolBtn(
+                                      _isLandscape
+                                          ? Icons.screen_rotation
+                                          : Icons.rotate_left,
+                                      () {
+                                        setState(
+                                          () => _isLandscape = !_isLandscape,
+                                        );
+                                        _startToolbarTimer();
+                                      },
+                                    )
+                                  else
+                                    _toolBtn(
+                                      Icons.lock_outline,
+                                      () => ProLocked(
+                                        feature: PremiumFeature.landscapeMode,
+                                        child: const SizedBox(),
+                                      ).showUpgrade(context),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  if (PremiumManager.hasAccess(
+                                    PremiumFeature.measurement,
+                                  ))
+                                    _toolBtn(
+                                      _measureMode
+                                          ? Icons.horizontal_rule
+                                          : Icons.straighten,
+                                      () {
+                                        setState(() {
+                                          _measureMode = !_measureMode;
+                                          _measurePoints.clear();
+                                        });
+                                        _startToolbarTimer();
+                                      },
+                                    )
+                                  else
+                                    _toolBtn(
+                                      Icons.lock_outline,
+                                      () => ProLocked(
+                                        feature: PremiumFeature.measurement,
+                                        child: const SizedBox(),
+                                      ).showUpgrade(context),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  if (PremiumManager.hasAccess(
+                                    PremiumFeature.overlayMode,
+                                  ))
+                                    _toolBtn(
+                                      _overlayMode
+                                          ? Icons.layers_clear
+                                          : Icons.layers,
+                                      () {
+                                        setState(
+                                          () => _overlayMode = !_overlayMode,
+                                        );
+                                        _startToolbarTimer();
+                                      },
+                                    )
+                                  else
+                                    _toolBtn(
+                                      Icons.lock_outline,
+                                      () => ProLocked(
+                                        feature: PremiumFeature.overlayMode,
+                                        child: const SizedBox(),
+                                      ).showUpgrade(context),
+                                    ),
+                                  const SizedBox(width: 8),
+                                  if (PremiumManager.hasAccess(
+                                    PremiumFeature.screenshotExport,
+                                  ))
+                                    _toolBtn(Icons.download_rounded, () {
+                                      _takeScreenshot();
                                       _startToolbarTimer();
                                     })
                                   else
-                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.landscapeMode, child: const SizedBox()).showUpgrade(context)),
+                                    _toolBtn(
+                                      Icons.lock_outline,
+                                      () => ProLocked(
+                                        feature:
+                                            PremiumFeature.screenshotExport,
+                                        child: const SizedBox(),
+                                      ).showUpgrade(context),
+                                    ),
                                   const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(PremiumFeature.measurement))
-                                    _toolBtn(_measureMode ? Icons.horizontal_rule : Icons.straighten, () {
-                                      setState(() { _measureMode = !_measureMode; _measurePoints.clear(); });
+                                  ValueListenableBuilder<int>(
+                                    valueListenable: widget.controller.viewerCount,
+                                    builder: (_, count, w) {
+                                      return PremiumGate(
+                                        feature: PremiumFeature.multiDevice,
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => DeviceManagerScreen(
+                                                  isPro: PremiumManager.plan != Plan.free,
+                                                  currentViewers: count,
+                                                  maxViewers: PremiumManager.plan == Plan.team
+                                                      ? 999
+                                                      : PremiumManager.plan == Plan.pro
+                                                          ? 5
+                                                          : 1,
+                                                ),
+                                              ),
+                                            );
+                                            _startToolbarTimer();
+                                          },
+                                          child: Container(
+                                            width: _toolBtnSize,
+                                            height: _toolBtnSize,
+                                            decoration: const BoxDecoration(
+                                              color: AppPalette.card,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Stack(
+                                              clipBehavior: Clip.none,
+                                              children: [
+                                                Center(
+                                                  child: Icon(Icons.devices, color: Colors.white, size: _toolIconSize),
+                                                ),
+                                                if (count > 0)
+                                                  Positioned(
+                                                    right: -2,
+                                                    top: -2,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.all(4),
+                                                      decoration: const BoxDecoration(
+                                                        color: Color(0xFF22C55E),
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                      child: Text(
+                                                        '$count',
+                                                        style: const TextStyle(
+                                                          color: Colors.black,
+                                                          fontSize: 9,
+                                                          fontWeight: FontWeight.w700,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  if (PremiumManager.hasAccess(
+                                    PremiumFeature.sessionHistory,
+                                  ))
+                                    _toolBtn(Icons.history, () {
+                                      _showHistory();
                                       _startToolbarTimer();
                                     })
                                   else
-                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.measurement, child: const SizedBox()).showUpgrade(context)),
+                                    _toolBtn(
+                                      Icons.lock_outline,
+                                      () => ProLocked(
+                                        feature: PremiumFeature.sessionHistory,
+                                        child: const SizedBox(),
+                                      ).showUpgrade(context),
+                                    ),
                                   const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(PremiumFeature.overlayMode))
-                                    _toolBtn(_overlayMode ? Icons.layers_clear : Icons.layers, () {
-                                      setState(() => _overlayMode = !_overlayMode);
-                                      _startToolbarTimer();
-                                    })
-                                  else
-                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.overlayMode, child: const SizedBox()).showUpgrade(context)),
-                                  const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(PremiumFeature.screenshotExport))
-                                    _toolBtn(Icons.download_rounded, () { _takeScreenshot(); _startToolbarTimer(); })
-                                  else
-                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.screenshotExport, child: const SizedBox()).showUpgrade(context)),
-                                  const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(PremiumFeature.sessionHistory))
-                                    _toolBtn(Icons.history, () { _showHistory(); _startToolbarTimer(); })
-                                  else
-                                    _toolBtn(Icons.lock_outline, () => ProLocked(feature: PremiumFeature.sessionHistory, child: const SizedBox()).showUpgrade(context)),
-                                  const SizedBox(width: 8),
-                                  _toolBtn(Icons.settings, () { _showSettings(); _startToolbarTimer(); }),
+                                  _toolBtn(Icons.settings, () {
+                                    _showSettings();
+                                    _startToolbarTimer();
+                                  }),
                                 ],
                               ),
                             ),
@@ -2786,13 +4316,22 @@ class _PreviewScreenState extends State<PreviewScreen> with WidgetsBindingObserv
     );
   }
 
+  bool _isTabletSized(BuildContext c) => MediaQuery.of(c).size.shortestSide >= 600;
+
+  double get _toolBtnSize => _isTabletSized(context) ? 52 : 44;
+  double get _toolIconSize => _isTabletSized(context) ? 24 : 20;
+
   Widget _toolBtn(IconData icon, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 44, height: 44,
-        decoration: const BoxDecoration(color: AppPalette.card, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 20),
+        width: _toolBtnSize,
+        height: _toolBtnSize,
+        decoration: const BoxDecoration(
+          color: AppPalette.card,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white, size: _toolIconSize),
       ),
     );
   }
@@ -2823,7 +4362,10 @@ class _GridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GridPainter old) =>
-      old.cols != cols || old.rows != rows || old.cellW != cellW || old.cellH != cellH;
+      old.cols != cols ||
+      old.rows != rows ||
+      old.cellW != cellW ||
+      old.cellH != cellH;
 }
 
 class _RulerPainter extends CustomPainter {
@@ -2843,8 +4385,12 @@ class _RulerPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, rulerSize), bgPaint);
     canvas.drawRect(Rect.fromLTWH(0, 0, rulerSize, size.height), bgPaint);
 
-    final tickPaint = Paint()..color = const Color(0xAAFFFFFF)..strokeWidth = 1.0;
-    final guidePaint = Paint()..color = const Color(0x18FFFFFF)..strokeWidth = 0.5;
+    final tickPaint = Paint()
+      ..color = const Color(0xAAFFFFFF)
+      ..strokeWidth = 1.0;
+    final guidePaint = Paint()
+      ..color = const Color(0x18FFFFFF)
+      ..strokeWidth = 0.5;
 
     final totalPx = ((size.width + offsetX) / scale).ceil();
     for (double px = 0; px <= totalPx; px += tickInterval) {
@@ -2853,31 +4399,57 @@ class _RulerPainter extends CustomPainter {
       final isMajor = px % labelInterval == 0;
       canvas.drawLine(Offset(x, 0), Offset(x, isMajor ? 14.0 : 7.0), tickPaint);
       if (isMajor && x + 25 < size.width) {
-        final tp = TextPainter(text: TextSpan(text: '${px.toInt()}', style: const TextStyle(color: Color(0xAAFFFFFF), fontSize: 9)), textDirection: TextDirection.ltr)
-          ..layout(maxWidth: 40);
+        final tp = TextPainter(
+          text: TextSpan(
+            text: '${px.toInt()}',
+            style: const TextStyle(color: Color(0xAAFFFFFF), fontSize: 9),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: 40);
         tp.paint(canvas, Offset(x + 3, 14));
-        canvas.drawLine(Offset(x, rulerSize), Offset(x, size.height), guidePaint);
+        canvas.drawLine(
+          Offset(x, rulerSize),
+          Offset(x, size.height),
+          guidePaint,
+        );
       }
     }
 
-    for (double py = 0; py <= ((size.height + offsetY) / scale).ceil(); py += tickInterval) {
+    for (
+      double py = 0;
+      py <= ((size.height + offsetY) / scale).ceil();
+      py += tickInterval
+    ) {
       final y = py * scale - offsetY;
       if (y < 0 || y > size.height) continue;
       final isMajor = py % labelInterval == 0;
       canvas.drawLine(Offset(0, y), Offset(isMajor ? 14.0 : 7.0, y), tickPaint);
       if (isMajor && y + 25 < size.height) {
-        final tp = TextPainter(text: TextSpan(text: '${py.toInt()}', style: const TextStyle(color: Color(0xAAFFFFFF), fontSize: 9)), textDirection: TextDirection.ltr)
-          ..layout(maxWidth: 40);
+        final tp = TextPainter(
+          text: TextSpan(
+            text: '${py.toInt()}',
+            style: const TextStyle(color: Color(0xAAFFFFFF), fontSize: 9),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: 40);
         tp.paint(canvas, Offset(14, y + 3));
-        canvas.drawLine(Offset(rulerSize, y), Offset(size.width, y), guidePaint);
+        canvas.drawLine(
+          Offset(rulerSize, y),
+          Offset(size.width, y),
+          guidePaint,
+        );
       }
     }
 
-    canvas.drawRect(const Rect.fromLTWH(0, 0, rulerSize, rulerSize), Paint()..color = const Color(0xFF1C1C1E));
+    canvas.drawRect(
+      const Rect.fromLTWH(0, 0, rulerSize, rulerSize),
+      Paint()..color = const Color(0xFF1C1C1E),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _RulerPainter old) => old.scale != scale || old.offsetX != offsetX || old.offsetY != offsetY;
+  bool shouldRepaint(covariant _RulerPainter old) =>
+      old.scale != scale || old.offsetX != offsetX || old.offsetY != offsetY;
 }
 
 class _MeasurePainter extends CustomPainter {
@@ -2888,13 +4460,24 @@ class _MeasurePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (points.isEmpty) return;
-    final dotPaint = Paint()..color = Colors.white..style = PaintingStyle.fill;
+    final dotPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
     for (final p in points) {
       canvas.drawCircle(p, 4, dotPaint);
-      canvas.drawCircle(p, 2, Paint()..color = const Color(0xFF22C55E)..style = PaintingStyle.fill);
+      canvas.drawCircle(
+        p,
+        2,
+        Paint()
+          ..color = const Color(0xFF22C55E)
+          ..style = PaintingStyle.fill,
+      );
     }
     if (points.length == 2) {
-      final linePaint = Paint()..color = Colors.white..strokeWidth = 1.5..style = PaintingStyle.stroke;
+      final linePaint = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 1.5
+        ..style = PaintingStyle.stroke;
       canvas.drawLine(points[0], points[1], linePaint);
     }
   }
@@ -2915,4 +4498,8 @@ Widget _card({required Widget child}) {
   );
 }
 
-const _h = TextStyle(color: AppPalette.text, fontSize: 18, fontWeight: FontWeight.w700);
+const _h = TextStyle(
+  color: AppPalette.text,
+  fontSize: 18,
+  fontWeight: FontWeight.w700,
+);

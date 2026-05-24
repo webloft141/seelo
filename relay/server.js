@@ -51,6 +51,7 @@ const io = new Server(server, {
 
 // Active sessions (declared early so health check can reference it)
 const sessions = {};
+const userSessions = {}; // uid -> Set<sessionId>
 
 // Serve socket.io client for Figma plugin (overcomes CSP issues)
 app.get('/socket.io.min.js', (req, res) => {
@@ -157,6 +158,60 @@ app.get('/api/plans', (req, res) => {
   res.json({ plans: list });
 });
 
+// --- Device listing, analytics, team endpoints ---
+
+// List connected devices for the current user
+app.get('/api/devices', verifyToken, (req, res) => {
+  const uid = req.uid;
+  const sessionIds = userSessions[uid] ? [...userSessions[uid]] : [];
+  const devices = [];
+  for (const sid of sessionIds) {
+    const session = sessions[sid];
+    if (!session) continue;
+    const viewerCount = session.viewers ? session.viewers.length : 0;
+    devices.push({
+      sessionId: sid,
+      viewerCount,
+      maxViewers: session.maxViewers || 1,
+      viewerIds: session.viewers || [],
+    });
+  }
+  res.json({ devices, totalDevices: devices.reduce((s, d) => s + d.viewerCount, 0) });
+});
+
+// Analytics for the current user
+app.get('/api/analytics', verifyToken, (req, res) => {
+  const uid = req.uid;
+  const user = store.getUser(uid);
+  const stats = user.stats || { totalSessions: 0, totalPreviews: 0 };
+  const sessionIds = userSessions[uid] ? [...userSessions[uid]] : [];
+  let activeConnections = 0;
+  for (const sid of sessionIds) {
+    const session = sessions[sid];
+    if (session && session.viewers) activeConnections += session.viewers.length;
+  }
+  res.json({
+    totalSessions: stats.totalSessions || 0,
+    totalPreviews: stats.totalPreviews || 0,
+    activeConnections,
+  });
+});
+
+// Team info
+app.get('/api/team', verifyToken, (req, res) => {
+  const uid = req.uid;
+  const plan = store.getUserPlan(uid);
+  res.json({
+    teamName: 'My Team',
+    plan: plan.plan,
+    memberCount: 1,
+    maxMembers: plan.plan.includes('team') ? 25 : 1,
+    features: plan.plan.includes('team')
+      ? ['Unlimited shared sessions', 'Admin dashboard', 'Team analytics']
+      : [],
+  });
+});
+
 // --- Firebase token cache (30 min TTL) ---
 const tokenCache = new Map();
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
@@ -237,9 +292,15 @@ io.on('connection', (socket) => {
       }
       socket.data.sessionId = sessionId;
       socket.data.role = 'plugin';
+      socket.data.uid = uid || null;
       socket.join(sessionId);
       const userPlan = uid ? store.getUserPlan(uid).plan : 'free';
       socket.emit('plan-limit', { maxViewers: numericMax, plan: userPlan });
+      if (uid) {
+        if (!userSessions[uid]) userSessions[uid] = new Set();
+        userSessions[uid].add(sessionId);
+        store.incrementUserStat(uid, 'totalSessions');
+      }
       return;
     }
 
@@ -298,6 +359,8 @@ io.on('connection', (socket) => {
     if (!sessions[sessionId]) sessions[sessionId] = {};
     sessions[sessionId].design = data;
     socket.to(sessionId).emit('cloud-design', data);
+    const uid = socket.data.uid;
+    if (uid) store.incrementUserStat(uid, 'totalPreviews');
   });
 
   // Desktop mode heartbeat — prevent disconnect from idle timeouts
@@ -315,6 +378,11 @@ io.on('connection', (socket) => {
           sessions[sessionId].viewers = [];
           io.to(sessionId).emit('viewer-count', viewerCount);
         }
+      }
+      const uid = socket.data.uid;
+      if (uid && userSessions[uid]) {
+        userSessions[uid].delete(sessionId);
+        if (userSessions[uid].size === 0) delete userSessions[uid];
       }
     }
   });
