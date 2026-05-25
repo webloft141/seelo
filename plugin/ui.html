@@ -495,14 +495,11 @@
             setDeviceStatus('Starting Google sign-in...');
 
             try {
-                // Request device code from Google
-                const resp = await fetch('https://oauth2.googleapis.com/device/code', {
+                // Request device code via relay server (avoids CORS issues from data: URI)
+                const resp = await fetch(relayUrl + '/api/auth/device-code', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        client_id: GOOGLE_CLIENT_ID,
-                        scope: 'openid email profile'
-                    })
+                    body: JSON.stringify({ client_id: GOOGLE_CLIENT_ID })
                 });
                 const data = await resp.json();
 
@@ -517,16 +514,15 @@
                 document.getElementById('device-user-code').innerText = user_code;
                 setDeviceStatus('Waiting — enter the code on google.com/device');
 
-                // Poll Google for the token
+                // Poll relay server for the token (relay proxies to Google)
                 deviceCodePollTimer = setInterval(async () => {
                     try {
-                        const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+                        const tokenResp = await fetch(relayUrl + '/api/auth/device-token', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 client_id: GOOGLE_CLIENT_ID,
-                                device_code: device_code,
-                                grant_type: 'urn:ietf:params:oauth:grant-type:device_code'
+                                device_code: device_code
                             })
                         });
                         const tokenData = await tokenResp.json();
@@ -552,14 +548,14 @@
 
                         setDeviceStatus('Signing in...');
 
-                        // Try signInWithCredential first (works in data: URI — just an API call)
+                        // Try signInWithCredential first (just an API call — should work in data: URI)
                         try {
                             const credential = firebase.auth.GoogleAuthProvider.credential(tokenData.id_token);
                             await fbAuth.signInWithCredential(credential);
                             hideAuth();
                             resetDeviceCodeView();
                         } catch (credErr) {
-                            // Fallback: relay server → Firebase custom token
+                            // Fallback: same relay server → Firebase custom token
                             try {
                                 const relayResp = await fetch(relayUrl + '/api/auth/google-token', {
                                     method: 'POST',
@@ -581,7 +577,7 @@
                     } catch (_) {
                         // network retry — keep polling
                     }
-                }, Math.max(2000, (interval || 5) * 1000));
+                }, 2000);
 
                 // Timeout after 5 minutes
                 setTimeout(() => {
@@ -593,7 +589,7 @@
                 }, 5 * 60 * 1000);
 
             } catch (e) {
-                setDeviceStatus('Could not reach Google. Check your connection.', true);
+                setDeviceStatus('Could not reach relay server. Check your connection.', true);
             }
         }
 
