@@ -352,6 +352,9 @@
             console.warn('Firebase SDK not loaded (CSP may have blocked CDN), auth disabled');
         }
 
+        // Relay server URL
+        let relayUrl = 'https://seelo-relay.onrender.com';
+
         // Token refresh utility
         async function getValidToken() {
             if (!currentUser) return null;
@@ -459,41 +462,59 @@
                 errorEl.innerText = 'Authentication is unavailable (Firebase failed to load)';
                 return;
             }
+
             const sessionId = 'seelo_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
             const authUrl = relayUrl + '/oauth-callback?sessionId=' + encodeURIComponent(sessionId);
-            window.open(authUrl, '_blank');
-
             const statusEl = document.getElementById('auth-submit');
             const originalText = statusEl.innerText;
             statusEl.disabled = true;
-            statusEl.innerText = 'Waiting for sign-in...';
 
-            let pollCount = 0;
-            const pollTimer = setInterval(async () => {
-                pollCount++;
-                if (pollCount > 60) {
-                    clearInterval(pollTimer);
-                    statusEl.disabled = false;
-                    statusEl.innerText = originalText;
-                    errorEl.innerText = 'Sign-in timed out. Please try again.';
-                    return;
-                }
-                try {
-                    const resp = await fetch(relayUrl + '/api/auth/session?sessionId=' + encodeURIComponent(sessionId));
-                    const data = await resp.json();
-                    if (data.status === 'complete') {
+            // Pre-warm relay server (wake from sleep)
+            statusEl.innerText = 'Waking server...';
+            fetch(relayUrl + '/api/health', { mode: 'no-cors' }).catch(() => {});
+
+            // Try opening via Figma API first (most reliable)
+            setTimeout(() => {
+                statusEl.innerText = 'Open the new tab and sign in with Google...';
+                parent.postMessage({ pluginMessage: { type: 'open-external', url: authUrl } }, '*');
+                // Also try window.open as fallback
+                try { window.open(authUrl, '_blank'); } catch (_) {}
+
+                // Show the URL as text too (user can copy-paste)
+                errorEl.style.color = 'var(--text-sec)';
+                errorEl.style.fontSize = '11px';
+                errorEl.innerHTML = 'If no tab opened, <a href="' + authUrl.replace(/&/g,'&amp;') + '" target="_blank" style="color:#6366f1;">click here</a> or copy this URL:<br><span style="font-size:10px;color:var(--text-dim);word-break:break-all;display:inline-block;margin-top:4px;">' + authUrl.replace(/&/g,'&amp;') + '</span>';
+
+                // Poll for auth result
+                let pollCount = 0;
+                const pollTimer = setInterval(async () => {
+                    pollCount++;
+                    if (pollCount > 90) { // 3 min timeout
                         clearInterval(pollTimer);
-                        if (data.customToken && fbAuth) {
-                            await fbAuth.signInWithCustomToken(data.customToken);
-                        }
-                        hideAuth();
                         statusEl.disabled = false;
                         statusEl.innerText = originalText;
+                        errorEl.style.color = '#ef4444';
+                        errorEl.style.fontSize = '11px';
+                        errorEl.innerText = 'Sign-in timed out. Close this and try again.';
+                        return;
                     }
-                } catch (e) {
-                    // Retry on network error
-                }
-            }, 2000);
+                    try {
+                        const resp = await fetch(relayUrl + '/api/auth/session?sessionId=' + encodeURIComponent(sessionId));
+                        const data = await resp.json();
+                        if (data.status === 'complete') {
+                            clearInterval(pollTimer);
+                            if (data.customToken && fbAuth) {
+                                await fbAuth.signInWithCustomToken(data.customToken);
+                            }
+                            hideAuth();
+                            statusEl.disabled = false;
+                            statusEl.innerText = originalText;
+                        }
+                    } catch (_) {
+                        // Retry on network error
+                    }
+                }, 2000);
+            }, 1500);
         }
 
         function logout() {
@@ -835,8 +856,6 @@
         let cloudSyncTimer = null;
         let cloudDataReceived = false;
         let cloudPendingSync = false;
-        let relayUrl = 'https://seelo-relay.onrender.com';
-
         function startCloudSession() {
             showToast('Starting cloud session...');
             cloudSessionId = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);

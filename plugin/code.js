@@ -378,6 +378,11 @@ figma.ui.onmessage = async (msg) => {
             }
         } catch (_) {}
     }
+    if (msg.type === 'open-external') {
+        try {
+            figma.openExternal(msg.url);
+        } catch (_) {}
+    }
     if (msg.type === 'save-state') {
         try {
             await figma.clientStorage.setAsync('seelo_plugin_state', msg.data);
