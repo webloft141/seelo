@@ -370,6 +370,13 @@
 
         // Relay server URL
         let relayUrl = 'https://seelo-relay.onrender.com';
+        // Auto-detect local relay server for faster dev
+        (async () => {
+            try {
+                const r = await fetch('http://localhost:3001/api/health');
+                if (r.ok) { relayUrl = 'http://localhost:3001'; console.log('Using local relay server'); }
+            } catch (_) {}
+        })();
 
         // Token refresh utility
         async function getValidToken() {
