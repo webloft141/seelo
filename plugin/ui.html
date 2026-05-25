@@ -378,7 +378,7 @@
         }
 
         // Relay server URL — localStorage override, then localhost, then Render fallback
-        let relayUrl = storage.getItem('seelo_relay_url') || 'https://seelo-relay.onrender.com';
+        let relayUrl = storage.getItem('seelo_relay_url') || 'https://seelo-production.up.railway.app';
         (async () => {
             try {
                 const r = await fetch('http://localhost:3001/api/health');
