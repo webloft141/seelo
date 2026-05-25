@@ -489,9 +489,13 @@
             dcSection.style.display = 'block';
             dcSection.classList.remove('hidden');
             document.getElementById('device-user-code').innerText = '';
-            setDeviceStatus('Starting Google sign-in...');
+            setDeviceStatus('Starting...');
+
+            const sessionId = 'seelo_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+            const manualUrl = relayUrl + '/oauth-callback?sessionId=' + encodeURIComponent(sessionId);
 
             try {
+                // Try device code flow via relay proxy
                 const resp = await fetch(relayUrl + '/api/auth/device-code', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -500,14 +504,16 @@
                 const data = await resp.json();
 
                 if (data.error) {
-                    setDeviceStatus(data.error_description || 'Error: ' + JSON.stringify(data), true);
+                    // Device code failed — fallback to manual URL flow
+                    console.warn('Device code failed:', data);
+                    startManualUrlFlow(manualUrl, sessionId);
                     return;
                 }
 
-                const { device_code, user_code, interval } = data;
+                const { device_code, user_code } = data;
 
                 document.getElementById('device-user-code').innerText = user_code;
-                setDeviceStatus('Open google.com/device and enter the code above');
+                setDeviceStatus('Open google.com/device in your browser and enter the code above');
 
                 deviceCodePollTimer = setInterval(async () => {
                     try {
@@ -521,51 +527,22 @@
                         });
                         const tokenData = await tokenResp.json();
 
-                        if (tokenData.error === 'authorization_pending' || tokenData.error === 'slow_down') {
-                            return;
-                        }
-
-                        if (tokenData.error) {
-                            clearInterval(deviceCodePollTimer);
-                            deviceCodePollTimer = null;
-                            setDeviceStatus(tokenData.error_description || tokenData.error, true);
-                            return;
-                        }
+                        if (tokenData.error === 'authorization_pending' || tokenData.error === 'slow_down') return;
 
                         clearInterval(deviceCodePollTimer);
                         deviceCodePollTimer = null;
 
-                        if (!tokenData.id_token) {
-                            setDeviceStatus('No ID token received — try again.', true);
+                        if (tokenData.error) {
+                            setDeviceStatus(tokenData.error_description || tokenData.error, true);
                             return;
                         }
 
-                        setDeviceStatus('Signing in...');
-
-                        try {
-                            const credential = firebase.auth.GoogleAuthProvider.credential(tokenData.id_token);
-                            await fbAuth.signInWithCredential(credential);
-                            hideAuth();
-                            resetDeviceCodeView();
-                        } catch (credErr) {
-                            try {
-                                const relayResp = await fetch(relayUrl + '/api/auth/google-token', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ idToken: tokenData.id_token })
-                                });
-                                const relayData = await relayResp.json();
-                                if (relayData.customToken) {
-                                    await fbAuth.signInWithCustomToken(relayData.customToken);
-                                    hideAuth();
-                                    resetDeviceCodeView();
-                                } else {
-                                    setDeviceStatus('Sign-in failed. Try email/password.', true);
-                                }
-                            } catch (relayErr) {
-                                setDeviceStatus('Sign-in failed. Try email/password instead.', true);
-                            }
+                        if (!tokenData.id_token) {
+                            setDeviceStatus('No ID token received.', true);
+                            return;
                         }
+
+                        await completeSignIn(tokenData.id_token);
                     } catch (_) {}
                 }, 2000);
 
@@ -573,19 +550,89 @@
                     if (deviceCodePollTimer) {
                         clearInterval(deviceCodePollTimer);
                         deviceCodePollTimer = null;
-                        setDeviceStatus('Timed out — close and try again.', true);
+                        setDeviceStatus('Timed out. Click Back and try again.', true);
                     }
                 }, 5 * 60 * 1000);
 
             } catch (e) {
-                setDeviceStatus('Could not reach relay server. Check your connection.', true);
+                // Network error — fallback to manual URL flow
+                startManualUrlFlow(manualUrl, sessionId);
             }
         }
 
-        function setDeviceStatus(msg, isError) {
-            const el = document.getElementById('device-status');
-            el.innerHTML = msg;
-            el.style.color = isError ? '#ef4444' : '';
+        function startManualUrlFlow(url, sessionId) {
+            const dcSection = document.getElementById('device-code-section');
+            dcSection.innerHTML = `
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;">Sign in with Google</div>
+                <div style="font-size:11px;color:var(--text-sec);margin-bottom:4px;">
+                    1. Open this link in your browser:
+                </div>
+                <div style="font-size:9px;color:#6366f1;word-break:break-all;margin:4px 0 8px;padding:6px;background:var(--bg);border-radius:6px;">
+                    ${url}
+                </div>
+                <div style="font-size:11px;color:var(--text-sec);margin-bottom:6px;">
+                    2. Sign in with Google on that page
+                </div>
+                <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">
+                    3. Come back here — you\'ll be signed in automatically
+                </div>
+                <div id="device-status" style="font-size:11px;color:var(--text-dim);margin:6px 0;">Waiting for sign-in...</div>
+                <button type="button" class="btn-s" onclick="cancelDeviceCode()" style="margin-top:8px;padding:5px 14px;font-size:11px;">Back</button>
+            `;
+
+            // Poll for auth result
+            deviceCodePollTimer = setInterval(async () => {
+                try {
+                    const resp = await fetch(relayUrl + '/api/auth/session?sessionId=' + encodeURIComponent(sessionId));
+                    const data = await resp.json();
+                    if (data.status === 'complete') {
+                        clearInterval(deviceCodePollTimer);
+                        deviceCodePollTimer = null;
+                        if (data.customToken && fbAuth) {
+                            await fbAuth.signInWithCustomToken(data.customToken);
+                        }
+                        hideAuth();
+                        resetDeviceCodeView();
+                    }
+                } catch (_) {}
+            }, 2000);
+
+            setTimeout(() => {
+                if (deviceCodePollTimer) {
+                    clearInterval(deviceCodePollTimer);
+                    deviceCodePollTimer = null;
+                    const st = document.getElementById('device-status');
+                    if (st) st.innerHTML = 'Timed out. Click Back and try again.';
+                }
+            }, 5 * 60 * 1000);
+        }
+
+        async function completeSignIn(googleIdToken) {
+            setDeviceStatus('Signing in...');
+            try {
+                const credential = firebase.auth.GoogleAuthProvider.credential(googleIdToken);
+                await fbAuth.signInWithCredential(credential);
+                hideAuth();
+                resetDeviceCodeView();
+            } catch (credErr) {
+                try {
+                    const relayResp = await fetch(relayUrl + '/api/auth/google-token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ idToken: googleIdToken })
+                    });
+                    const relayData = await relayResp.json();
+                    if (relayData.customToken) {
+                        await fbAuth.signInWithCustomToken(relayData.customToken);
+                        hideAuth();
+                        resetDeviceCodeView();
+                    } else {
+                        setDeviceStatus('Sign-in failed. Try email/password.', true);
+                    }
+                } catch (relayErr) {
+                    setDeviceStatus('Sign-in failed. Try email/password.', true);
+                }
+            }
         }
 
         function cancelDeviceCode() {
@@ -594,6 +641,11 @@
                 deviceCodePollTimer = null;
             }
             resetDeviceCodeView();
+        }
+
+        function setDeviceStatus(msg, isError) {
+            const el = document.getElementById('device-status');
+            if (el) { el.innerHTML = msg; el.style.color = isError ? '#ef4444' : ''; }
         }
 
         function resetDeviceCodeView() {
