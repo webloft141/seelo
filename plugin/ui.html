@@ -332,6 +332,15 @@
             </div>
             <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim);text-align:center;">
                 Free plan: 1 active device • Pro: 5 devices • Team: unlimited
+                <div style="margin-top:6px;">
+                    <span id="relay-label" style="cursor:pointer;color:var(--text-dim);" onclick="toggleRelayConfig()">⚙️ Server</span>
+                    <div id="relay-config" class="hidden" style="display:none;margin-top:6px;text-align:left;">
+                        <label style="font-size:9px;color:var(--text-dim);display:block;margin-bottom:2px;">Relay Server URL</label>
+                        <input id="relay-url-input" type="url" value="" style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:10px;outline:none;">
+                        <button type="button" class="btn-s" onclick="saveRelayUrl()" style="padding:3px 10px;font-size:9px;margin-top:4px;">Save</button>
+                        <span id="relay-saved-msg" style="font-size:9px;color:var(--success);display:none;margin-left:6px;">Saved!</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -368,9 +377,8 @@
             console.warn('Firebase SDK not loaded (CSP may have blocked CDN), auth disabled');
         }
 
-        // Relay server URL
-        let relayUrl = 'https://seelo-relay.onrender.com';
-        // Auto-detect local relay server for faster dev
+        // Relay server URL — localStorage override, then localhost, then Render fallback
+        let relayUrl = storage.getItem('seelo_relay_url') || 'https://seelo-relay.onrender.com';
         (async () => {
             try {
                 const r = await fetch('http://localhost:3001/api/health');
@@ -1033,6 +1041,26 @@
                 setTimeout(() => { document.getElementById('footer-status').innerText = 'Ready'; }, 2000);
             } catch (e) {
                 document.getElementById('footer-status').innerText = 'Copy failed';
+            }
+        }
+
+        // --- Relay URL config ---
+        function toggleRelayConfig() {
+            const el = document.getElementById('relay-config');
+            const shown = el.style.display !== 'none';
+            el.style.display = shown ? 'none' : 'block';
+            if (!shown) {
+                const saved = storage.getItem('seelo_relay_url') || 'https://seelo-relay.onrender.com';
+                document.getElementById('relay-url-input').value = saved;
+            }
+        }
+        function saveRelayUrl() {
+            const val = document.getElementById('relay-url-input').value.trim();
+            if (val) {
+                storage.setItem('seelo_relay_url', val);
+                relayUrl = val;
+                document.getElementById('relay-saved-msg').style.display = 'inline';
+                setTimeout(() => { document.getElementById('relay-saved-msg').style.display = 'none'; }, 2000);
             }
         }
 
