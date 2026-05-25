@@ -157,12 +157,14 @@ app.post('/api/auth/device-code', async (req, res) => {
   const { client_id } = req.body;
   if (!client_id) return res.status(400).json({ error: 'Missing client_id' });
   try {
+    const body = new URLSearchParams({ client_id, scope: 'openid email profile' });
     const r = await fetch('https://oauth2.googleapis.com/device/code', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id, scope: 'openid email profile' }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
     });
     const data = await r.json();
+    console.log('device/code response:', JSON.stringify(data).slice(0, 200));
     res.json(data);
   } catch (e) {
     res.status(502).json({ error: 'Google API unreachable' });
@@ -174,14 +176,15 @@ app.post('/api/auth/device-token', async (req, res) => {
   const { client_id, device_code } = req.body;
   if (!client_id || !device_code) return res.status(400).json({ error: 'Missing client_id or device_code' });
   try {
+    const body = new URLSearchParams({
+      client_id,
+      device_code,
+      grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+    });
     const r = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id,
-        device_code,
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-      }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
     });
     const data = await r.json();
     res.json(data);
