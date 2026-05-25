@@ -467,8 +467,8 @@
             });
         }
 
-        let googleAuthTimer = null;
         let googleAuthPoll = null;
+        let googleAuthSessionId = '';
 
         function signInWithGoogle() {
             const errorEl = document.getElementById('auth-error');
@@ -483,60 +483,57 @@
             const statusView = document.getElementById('google-auth-status');
             statusView.style.display = 'block';
             statusView.classList.remove('hidden');
-            document.getElementById('google-auth-msg').innerText = 'Preparing sign-in...';
-            document.getElementById('google-auth-url-text').style.display = 'none';
 
-            const sessionId = 'seelo_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-            const authUrl = relayUrl + '/oauth-callback?sessionId=' + encodeURIComponent(sessionId);
+            googleAuthSessionId = 'seelo_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+            const authUrl = relayUrl + '/oauth-callback?sessionId=' + encodeURIComponent(googleAuthSessionId);
+
+            const msgEl = document.getElementById('google-auth-msg');
+            const urlText = document.getElementById('google-auth-url-text');
 
             // Pre-warm relay server
             fetch(relayUrl + '/api/health', { mode: 'no-cors' }).catch(() => {});
 
-            googleAuthTimer = setTimeout(() => {
-                document.getElementById('google-auth-msg').innerHTML =
-                    'A new browser tab should open. Sign in with Google there, then return here.';
+            msgEl.innerHTML = 'Opening Google sign-in...';
 
-                // 1) figma.openExternal via parent.postMessage
-                parent.postMessage({ pluginMessage: { type: 'open-external', url: authUrl } }, '*');
+            // 1) figma.openExternal via parent.postMessage
+            parent.postMessage({ pluginMessage: { type: 'open-external', url: authUrl } }, '*');
 
-                // 2) window.open fallback
-                try { window.open(authUrl, '_blank'); } catch (_) {}
+            // 2) window.open fallback
+            try { window.open(authUrl, '_blank'); } catch (_) {}
 
-                // 3) Show clickable URL as last resort
-                const urlText = document.getElementById('google-auth-url-text');
-                urlText.innerHTML = 'If nothing opens, <a href="' + authUrl.replace(/&/g,'&amp;') + '" target="_blank" style="color:#6366f1;">click here</a>';
-                urlText.style.display = 'block';
+            // 3) Show clickable URL as fallback
+            urlText.innerHTML = 'Tab not opening? <a href="' + authUrl.replace(/&/g,'&amp;') + '" target="_blank" style="color:#6366f1;">Click here to open</a>';
+            urlText.style.display = 'block';
 
-                // Start polling relay for auth result
-                let pollCount = 0;
-                googleAuthPoll = setInterval(async () => {
-                    pollCount++;
-                    if (pollCount > 90) { // 3 min timeout
+            // Start polling relay for auth result
+            let pollCount = 0;
+            msgEl.innerHTML = 'A new browser tab should open. Sign in there, then return here.';
+            googleAuthPoll = setInterval(async () => {
+                pollCount++;
+                if (pollCount > 120) { // 4 min timeout
+                    clearInterval(googleAuthPoll);
+                    googleAuthPoll = null;
+                    msgEl.innerHTML = 'Timed out. Click Cancel and try again.';
+                    return;
+                }
+                try {
+                    const resp = await fetch(relayUrl + '/api/auth/session?sessionId=' + encodeURIComponent(googleAuthSessionId));
+                    const data = await resp.json();
+                    if (data.status === 'complete') {
                         clearInterval(googleAuthPoll);
                         googleAuthPoll = null;
-                        document.getElementById('google-auth-msg').innerText = 'Timed out. Click Cancel and try again.';
-                        return;
-                    }
-                    try {
-                        const resp = await fetch(relayUrl + '/api/auth/session?sessionId=' + encodeURIComponent(sessionId));
-                        const data = await resp.json();
-                        if (data.status === 'complete') {
-                            clearInterval(googleAuthPoll);
-                            googleAuthPoll = null;
-                            if (data.customToken && fbAuth) {
-                                await fbAuth.signInWithCustomToken(data.customToken);
-                            }
-                            hideAuth();
-                            resetGoogleAuthView();
+                        if (data.customToken && fbAuth) {
+                            await fbAuth.signInWithCustomToken(data.customToken);
                         }
-                    } catch (_) {}
-                }, 2000);
-            }, 1500);
+                        hideAuth();
+                        resetGoogleAuthView();
+                    }
+                } catch (_) {}
+            }, 2000);
         }
 
         function cancelGoogleAuth() {
             if (googleAuthPoll) { clearInterval(googleAuthPoll); googleAuthPoll = null; }
-            if (googleAuthTimer) { clearTimeout(googleAuthTimer); googleAuthTimer = null; }
             resetGoogleAuthView();
         }
 
