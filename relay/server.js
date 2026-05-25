@@ -90,6 +90,67 @@ app.get('/terms', (req, res) => {
 app.get('/privacy', (req, res) => {
   res.sendFile(path.join(__dirname, 'privacy.html'));
 });
+app.get('/oauth-callback', (req, res) => {
+  res.sendFile(path.join(__dirname, 'oauth-callback.html'));
+});
+
+// --- Auth Session API (for Figma plugin Google sign-in) ---
+// In-memory store for pending auth sessions: sessionId -> { customToken, uid, email }
+const authSessions = new Map();
+
+// Clean up old sessions every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, data] of authSessions) {
+    if (now - data.created > 10 * 60 * 1000) authSessions.delete(id); // 10 min TTL
+  }
+}, 300000);
+
+// Figma plugin calls this after Google sign-in completes in the popup page
+app.post('/api/auth/complete', async (req, res) => {
+  const { sessionId, idToken } = req.body;
+  if (!sessionId || !idToken) {
+    return res.status(400).json({ error: 'Missing sessionId or idToken' });
+  }
+  try {
+    const decoded = await verifyTokenCached(idToken);
+    const uid = decoded.uid;
+    const email = decoded.email || '';
+    // Create a Firebase custom token so the plugin's Auth SDK can sign in
+    let customToken = '';
+    try {
+      customToken = await admin.auth().createCustomToken(uid);
+    } catch (e) {
+      console.warn('Failed to create custom token:', e.message);
+    }
+    authSessions.set(sessionId, {
+      uid,
+      email,
+      customToken,
+      created: Date.now(),
+    });
+    // Also ensure user exists in store
+    const user = store.getUser(uid);
+    user.email = email || user.email;
+    res.json({ success: true, uid, email });
+  } catch (e) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+// Plugin polls this endpoint to check if auth completed
+app.get('/api/auth/session', (req, res) => {
+  const sessionId = req.query.sessionId || '';
+  if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+  const session = authSessions.get(sessionId);
+  if (!session) return res.json({ status: 'pending' });
+  res.json({
+    status: 'complete',
+    uid: session.uid,
+    email: session.email,
+    customToken: session.customToken || '',
+  });
+});
 
 // --- Subscription API ---
 
@@ -180,6 +241,7 @@ app.get('/api/devices', verifyToken, (req, res) => {
       viewerCount,
       maxViewers: session.maxViewers || 1,
       viewerIds: session.viewers || [],
+      desktopConnected: Boolean(session.plugin),
     });
   }
   res.json({ devices, totalDevices: devices.reduce((s, d) => s + d.viewerCount, 0) });
@@ -352,6 +414,11 @@ io.on('connection', (socket) => {
         socket.emit('cloud-design', session.design);
       }
 
+      // Send existing notes to the newly connected viewer
+      if (session.notes && session.notes.length > 0) {
+        socket.emit('existing-notes', { notes: session.notes });
+      }
+
       // Emit updated viewer count
       const finalViewerCount = session.viewers.length;
       io.to(sessionId).emit('viewer-count', finalViewerCount);
@@ -372,6 +439,54 @@ io.on('connection', (socket) => {
 
   // Desktop mode heartbeat — prevent disconnect from idle timeouts
   socket.on('plugin-heartbeat', () => {});
+
+  socket.on('request-frame-list', (data) => {
+    if (!checkSocketRate(socket, 'request-frame-list', 5)) return;
+    if (!data || !data.frames || !data.sessionId) return;
+    if (!sessions[data.sessionId]) sessions[data.sessionId] = { maxViewers: 1, viewers: [], design: null };
+    sessions[data.sessionId].frameList = data.frames;
+    socket.to(data.sessionId).emit('frame-list', data);
+  });
+
+  socket.on('frame-select', (data) => {
+    if (!checkSocketRate(socket, 'frame-select', 5)) return;
+    if (!data || !data.frameId || !data.sessionId) return;
+    socket.to(data.sessionId).emit('frame-select', data);
+  });
+
+  socket.on('add-note', (data) => {
+    if (!checkSocketRate(socket, 'add-note', 5)) return;
+    if (!data || !data.sessionId || !data.note) return;
+    if (!sessions[data.sessionId]) sessions[data.sessionId] = { maxViewers: 1, viewers: [], design: null };
+    if (!sessions[data.sessionId].notes) sessions[data.sessionId].notes = [];
+    sessions[data.sessionId].notes.push(data.note);
+    socket.to(data.sessionId).emit('note-added', data);
+  });
+
+  socket.on('delete-note', (data) => {
+    if (!checkSocketRate(socket, 'delete-note', 5)) return;
+    if (!data || !data.sessionId || !data.noteId) return;
+    const session = sessions[data.sessionId];
+    if (session && session.notes) {
+      session.notes = session.notes.filter(n => n.id !== data.noteId);
+    }
+    socket.to(data.sessionId).emit('note-deleted', data);
+  });
+
+  socket.on('auto-send-toggle', (data) => {
+    if (!checkSocketRate(socket, 'auto-send-toggle', 5)) return;
+    if (!data || !data.sessionId) return;
+    socket.to(data.sessionId).emit('auto-send-toggle', data);
+  });
+
+  socket.on('request-design', (data) => {
+    if (!checkSocketRate(socket, 'request-design', 5)) return;
+    if (!data || !data.sessionId) return;
+    const session = sessions[data.sessionId];
+    if (session && session.design) {
+      socket.emit('cloud-design', session.design);
+    }
+  });
 
   socket.on('disconnect', () => {
     const sessionId = socket.data.sessionId;

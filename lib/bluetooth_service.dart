@@ -1,7 +1,16 @@
 import 'dart:async';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'logger.dart';
 
-enum BleState { initial, unavailable, permissionDenied, bluetoothOff, scanning, idle, error }
+enum BleState {
+  initial,
+  unavailable,
+  permissionDenied,
+  bluetoothOff,
+  scanning,
+  idle,
+  error,
+}
 
 class SeeloBLEDevice {
   final String deviceId;
@@ -39,7 +48,8 @@ class SeeloBleService {
   StreamSubscription<List<ScanResult>>? _scanSub;
   BleState _state = BleState.initial;
 
-  Stream<List<SeeloBLEDevice>> get discoveredDevices => _deviceController.stream;
+  Stream<List<SeeloBLEDevice>> get discoveredDevices =>
+      _deviceController.stream;
   Stream<BleState> get stateStream => _stateController.stream;
   BleState get state => _state;
   bool get isScanning => _state == BleState.scanning;
@@ -48,7 +58,8 @@ class SeeloBleService {
     FlutterBluePlus.adapterState.listen((s) {
       if (s == BluetoothAdapterState.off) {
         _updateState(BleState.bluetoothOff);
-      } else if (s == BluetoothAdapterState.on && _state == BleState.bluetoothOff) {
+      } else if (s == BluetoothAdapterState.on &&
+          _state == BleState.bluetoothOff) {
         _updateState(BleState.idle);
       }
     });
@@ -76,13 +87,16 @@ class SeeloBleService {
 
       _updateState(BleState.idle);
       return BleState.idle;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st);
       _updateState(BleState.error);
       return BleState.error;
     }
   }
 
-  Future<String> startScan({Duration timeout = const Duration(seconds: 15)}) async {
+  Future<String> startScan({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
     if (_state == BleState.scanning) return '';
     _devices.clear();
     _updateState(BleState.scanning);
@@ -109,7 +123,9 @@ class SeeloBleService {
       return '';
     } on FlutterBluePlusException catch (e) {
       final msg = e.description ?? '';
-      if (msg.toLowerCase().contains('permission') || msg.toLowerCase().contains('denied') || msg.toLowerCase().contains('not granted')) {
+      if (msg.toLowerCase().contains('permission') ||
+          msg.toLowerCase().contains('denied') ||
+          msg.toLowerCase().contains('not granted')) {
         _updateState(BleState.permissionDenied);
         if (msg.contains('nearby')) {
           return 'Bluetooth permission denied. Go to Settings > Apps > Seelo > Permissions and grant "Nearby devices".';
@@ -118,7 +134,8 @@ class SeeloBleService {
       }
       _updateState(BleState.error);
       return 'Bluetooth scan failed: ${e.description ?? 'Unknown error'}';
-    } catch (e) {
+    } catch (e, st) {
+      logError(e, st);
       _updateState(BleState.error);
       return 'Bluetooth error: $e';
     }
@@ -127,23 +144,44 @@ class SeeloBleService {
   void _processScanResult(ScanResult result) {
     try {
       final adv = result.advertisementData;
-      final name = adv.advName.isNotEmpty ? adv.advName : result.device.platformName;
-      if (!name.contains(_seeloNamePrefix)) return;
+      final name = adv.advName.isNotEmpty
+          ? adv.advName
+          : result.device.platformName;
+      final nameLooksSeelo = name.toLowerCase().contains(
+        _seeloNamePrefix.toLowerCase(),
+      );
 
       final mfg = adv.manufacturerData;
-      final data = mfg[_seeloCompanyId];
-      if (data == null || data.length < 8) return;
+      List<int>? data = mfg[_seeloCompanyId];
+      if (data == null) {
+        for (final entry in mfg.entries) {
+          if (entry.value.length >= 8) {
+            data = entry.value;
+            break;
+          }
+        }
+      }
+      if (data == null || data.length < 8) {
+        if (!nameLooksSeelo) return;
+        return;
+      }
 
       final port = (data[0] << 8) | data[1];
       final ip = '${data[2]}.${data[3]}.${data[4]}.${data[5]}';
 
+      // Guard against malformed BLE payloads.
+      if (port <= 0 || port > 65535) return;
+      if (ip == '0.0.0.0') return;
+
       String roomSecret = '';
       if (data.length >= 22) {
-        roomSecret = data.sublist(6, 22)
+        roomSecret = data
+            .sublist(6, 22)
             .map((b) => b.toRadixString(16).padLeft(2, '0'))
             .join();
       } else if (data.length > 6) {
-        roomSecret = data.sublist(6)
+        roomSecret = data
+            .sublist(6)
             .map((b) => b.toRadixString(16).padLeft(2, '0'))
             .join();
       }
@@ -151,13 +189,15 @@ class SeeloBleService {
       final deviceId = result.device.remoteId.str;
       _devices[deviceId] = SeeloBLEDevice(
         deviceId: deviceId,
-        name: name,
+        name: name.isEmpty ? 'Seelo Device' : name,
         ip: ip,
         port: port,
         roomSecret: roomSecret,
         rssi: result.rssi,
       );
-    } catch (_) {}
+    } catch (e, st) {
+      logError(e, st);
+    }
   }
 
   Future<void> stopScan() async {
@@ -168,7 +208,9 @@ class SeeloBleService {
     _scanSub = null;
     try {
       await FlutterBluePlus.stopScan();
-    } catch (_) {}
+    } catch (e, st) {
+      logError(e, st);
+    }
   }
 
   void dispose() {

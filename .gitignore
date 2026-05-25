@@ -11,3 +11,8 @@ relay/service-account.json
 
 # Relay persistence (user data, plan info)
 relay/store-data.json
+
+# Keystore and signing credentials (keep secret!)
+android/key.properties
+*.jks
+*.keystore

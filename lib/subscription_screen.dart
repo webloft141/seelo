@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'premium.dart';
 import 'device_manager_screen.dart';
 import 'team_workspace_screen.dart';
 import 'analytics_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'auth_safe.dart';
+import 'auth_screen.dart';
+import 'logger.dart';
 
 const _relayUrl = 'https://seelo-relay.onrender.com';
 
@@ -18,7 +20,8 @@ class SubscriptionScreen extends StatefulWidget {
   State<SubscriptionScreen> createState() => _SubscriptionScreenState();
 }
 
-class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBindingObserver {
+class _SubscriptionScreenState extends State<SubscriptionScreen>
+    with WidgetsBindingObserver {
   String _currentPlan = 'free';
   String? _expiresAt;
   bool _loading = true;
@@ -31,7 +34,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _authSub = FirebaseAuth.instance.authStateChanges().listen((_) => _loadPlan());
+    final auth = safeAuth();
+    if (auth != null) {
+      _authSub = auth.authStateChanges().listen(
+        (_) => _loadPlan(),
+      );
+    }
     _loadPlan();
   }
 
@@ -52,17 +60,23 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
 
   Future<void> _loadPlan() async {
     setState(() => _loading = true);
-    final user = FirebaseAuth.instance.currentUser;
+    final user = safeCurrentUser();
     if (user == null) {
-      setState(() { _currentPlan = 'free'; _expiresAt = null; _loading = false; });
+      setState(() {
+        _currentPlan = 'free';
+        _expiresAt = null;
+        _loading = false;
+      });
       return;
     }
     try {
-      final token = await user.getIdToken();
+      final token = await user.getIdToken().timeout(
+        const Duration(seconds: 15),
+      );
       final res = await http.get(
         Uri.parse('$_relayUrl/api/user'),
         headers: {'Authorization': 'Bearer $token'},
-      );
+      ).timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -75,32 +89,51 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
         PremiumManager.setPlan(Plan.free);
         _showSnack('Could not load plan — server unreachable');
       }
-    } catch (e) {
-      if (_loading) setState(() => _currentPlan = 'free');
+    } catch (e, st) {
+      logError(e, st);
+      setState(() => _currentPlan = 'free');
       _showSnack('Network error — check your connection');
     }
     setState(() => _loading = false);
   }
 
-  bool get _isLoggedIn => FirebaseAuth.instance.currentUser != null;
-  bool get _isOnPaidPlan => _currentPlan.contains('pro') || _currentPlan.contains('team');
-  String get _userEmail => FirebaseAuth.instance.currentUser?.email ?? 'Not signed in';
+  bool get _isLoggedIn => safeCurrentUser() != null;
+  bool get _isOnPaidPlan =>
+      _currentPlan.contains('pro') || _currentPlan.contains('team');
+  String get _userEmail =>
+      safeCurrentUser()?.email ?? 'Not signed in';
 
   Future<void> _activateKey() async {
     final key = _keyController.text.trim();
-    if (key.isEmpty) { _showSnack('Enter a license key'); return; }
-    if (!_isLoggedIn) { _showSnack('Please sign in first'); return; }
+    if (key.isEmpty) {
+      _showSnack('Enter a license key');
+      return;
+    }
+    if (!_isLoggedIn) {
+      _showSnack('Please sign in first');
+      return;
+    }
 
     setState(() => _activating = true);
-    final user = FirebaseAuth.instance.currentUser!;
-    final token = await user.getIdToken();
+    final user = safeCurrentUser();
+    if (user == null) {
+      _showSnack('Please sign in first');
+      setState(() => _activating = false);
+      return;
+    }
+    final token = await user.getIdToken().timeout(
+      const Duration(seconds: 15),
+    );
 
     try {
       final res = await http.post(
         Uri.parse('$_relayUrl/api/activate-key'),
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
         body: jsonEncode({'key': key}),
-      );
+      ).timeout(const Duration(seconds: 15));
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 && data['success'] == true) {
         await _loadPlan();
@@ -109,7 +142,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
       } else {
         _showSnack(data['error'] ?? 'Invalid key');
       }
-    } catch (e) {
+    } catch (e, st) {
+      logError(e, st);
       _showSnack('Activation failed — check connection');
     }
     setState(() => _activating = false);
@@ -121,11 +155,33 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1B23),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Cancel Subscription?', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
-        content: const Text('You will lose Pro/Team features immediately. Current plan access will end now.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14)),
+        title: const Text(
+          'Cancel Subscription?',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: const Text(
+          'You will lose Pro/Team features immediately. Current plan access will end now.',
+          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Plan', style: TextStyle(color: Color(0xFF94A3B8)))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cancel', style: TextStyle(color: Color(0xFFEF4444)))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Keep Plan',
+              style: TextStyle(color: Color(0xFF94A3B8)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFFEF4444)),
+            ),
+          ),
         ],
       ),
     );
@@ -133,16 +189,19 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
 
     setState(() => _cancelling = true);
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final user = safeCurrentUser();
       if (user == null) return;
-      final token = await user.getIdToken();
+      final token = await user.getIdToken().timeout(
+        const Duration(seconds: 15),
+      );
       await http.post(
         Uri.parse('$_relayUrl/api/cancel-subscription'),
         headers: {'Authorization': 'Bearer $token'},
-      );
+      ).timeout(const Duration(seconds: 15));
       await _loadPlan();
       _showSnack('Plan cancelled');
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st);
       _showSnack('Failed to cancel');
     }
     setState(() => _cancelling = false);
@@ -185,20 +244,30 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
       backgroundColor: const Color(0xFF050508),
       appBar: AppBar(
         backgroundColor: const Color(0xFF050508),
-        title: const Text('Plans', style: TextStyle(fontWeight: FontWeight.w700)),
+        title: const Text(
+          'Plans',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: _planColor(_currentPlan).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   _planName(_currentPlan).toUpperCase(),
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _planColor(_currentPlan)),
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: _planColor(_currentPlan),
+                  ),
                 ),
               ),
             ),
@@ -224,18 +293,63 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
                   _buildCancelButton(),
                 ],
                 const SizedBox(height: 28),
-                const Text('Feature Comparison', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                const Text(
+                  'Feature Comparison',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 _buildComparisonTable(),
                 if (_currentPlan.contains('team')) ...[
                   const SizedBox(height: 20),
-                  const Text('Team Features', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Team Features',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 12),
-                  _featureButton(Icons.group, 'Team Workspace', () => Navigator.push(context, MaterialPageRoute(builder: (_) => TeamWorkspaceScreen(plan: _currentPlan)))),
+                  _featureButton(
+                    Icons.group,
+                    'Team Workspace',
+                    () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => TeamWorkspaceScreen(plan: _currentPlan),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  _featureButton(Icons.analytics, 'Analytics', () => Navigator.push(context, MaterialPageRoute(builder: (_) => AnalyticsScreen(plan: _currentPlan)))),
+                  _featureButton(
+                    Icons.analytics,
+                    'Analytics',
+                    () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AnalyticsScreen(plan: _currentPlan),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  _featureButton(Icons.devices, 'Device Manager', () => Navigator.push(context, MaterialPageRoute(builder: (_) => DeviceManagerScreen(isPro: _isOnPaidPlan, currentViewers: 0, maxViewers: _planMaxViewers(_currentPlan))))),
+                  _featureButton(
+                    Icons.devices,
+                    'Device Manager',
+                    () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => DeviceManagerScreen(
+                          isPro: _isOnPaidPlan,
+                          currentViewers: 0,
+                          maxViewers: _planMaxViewers(_currentPlan),
+                        ),
+                      ),
+                    ),
+                  ),
                 ] else ...[
                   const SizedBox(height: 20),
                   Container(
@@ -247,9 +361,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.devices, color: const Color(0xFF6366F1), size: 18),
+                        Icon(
+                          Icons.devices,
+                          color: const Color(0xFF6366F1),
+                          size: 18,
+                        ),
                         const SizedBox(width: 10),
-                        Expanded(child: Text('Multi-device, Team Workspace, Analytics & Device Manager are available on Pro/Team', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12))),
+                        Expanded(
+                          child: Text(
+                            'Multi-device is available on Pro/Team. Team Workspace, Analytics, and Device Manager require Team.',
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -259,13 +385,34 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     TextButton(
-                      onPressed: () => launchUrl(Uri.parse('$_relayUrl/terms'), mode: LaunchMode.externalApplication),
-                      child: const Text('Terms', style: TextStyle(color: Color(0xFF52525B), fontSize: 12)),
+                      onPressed: () => launchUrl(
+                        Uri.parse('$_relayUrl/terms'),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: const Text(
+                        'Terms',
+                        style: TextStyle(
+                          color: Color(0xFF52525B),
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
-                    const Text(' · ', style: TextStyle(color: Color(0xFF52525B), fontSize: 12)),
+                    const Text(
+                      ' · ',
+                      style: TextStyle(color: Color(0xFF52525B), fontSize: 12),
+                    ),
                     TextButton(
-                      onPressed: () => launchUrl(Uri.parse('$_relayUrl/privacy'), mode: LaunchMode.externalApplication),
-                      child: const Text('Privacy', style: TextStyle(color: Color(0xFF52525B), fontSize: 12)),
+                      onPressed: () => launchUrl(
+                        Uri.parse('$_relayUrl/privacy'),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: const Text(
+                        'Privacy',
+                        style: TextStyle(
+                          color: Color(0xFF52525B),
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -277,15 +424,23 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
   Widget _buildSkeleton() {
     return ListView(
       padding: const EdgeInsets.all(16),
-      children: List.generate(4, (_) => Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        height: 120,
-        decoration: BoxDecoration(
-          color: const Color(0xFF0C0D12),
-          borderRadius: BorderRadius.circular(16),
+      children: List.generate(
+        4,
+        (_) => Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          height: 120,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0C0D12),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Center(
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFF2D2E3A),
+            ),
+          ),
         ),
-        child: const Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D2E3A))),
-      )),
+      ),
     );
   }
 
@@ -297,28 +452,103 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFF1E1F28)),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: const Color(0xFF6366F1).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.person_rounded, color: Color(0xFF6366F1), size: 20),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: _isLoggedIn
+          ? Row(
               children: [
-                Text(_userEmail, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                Text('Current plan: ${_planName(_currentPlan)}', style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.person_rounded,
+                    color: Color(0xFF6366F1),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _userEmail,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'Current plan: ${_planName(_currentPlan)}',
+                        style: const TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.person_outline_rounded,
+                    color: Color(0xFFEF4444),
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Not signed in',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        width: double.infinity,
+                        child: TextButton(
+                          onPressed: () => showAuthSheet(context),
+                          style: TextButton.styleFrom(
+                            backgroundColor:
+                                const Color(0xFF6366F1).withValues(alpha: 0.15),
+                            foregroundColor: const Color(0xFF6366F1),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text(
+                            'Sign in / Register',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -335,20 +565,42 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
         children: [
           Row(
             children: [
-              Icon(Icons.vpn_key_rounded, size: 18, color: const Color(0xFF6366F1).withValues(alpha: 0.8)),
+              Icon(
+                Icons.vpn_key_rounded,
+                size: 18,
+                color: const Color(0xFF6366F1).withValues(alpha: 0.8),
+              ),
               const SizedBox(width: 8),
-              const Text('Activate License Key', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+              const Text(
+                'Activate License Key',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
-          const Text('Enter the key you received from Seelo to unlock Pro or Team features.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+          const Text(
+            'Enter the key you received from Seelo to unlock Pro or Team features.',
+            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: _keyController,
-            style: const TextStyle(color: Colors.white, fontSize: 14, letterSpacing: 1.5),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              letterSpacing: 1.5,
+            ),
             decoration: InputDecoration(
               hintText: 'SEELO-XXXXXXXX-XXXXXXXX',
-              hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 13, letterSpacing: 1),
+              hintStyle: const TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 13,
+                letterSpacing: 1,
+              ),
               filled: true,
               fillColor: const Color(0xFF050508),
               border: OutlineInputBorder(
@@ -363,7 +615,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: Color(0xFF6366F1)),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 14,
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -377,11 +632,26 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
                 disabledBackgroundColor: const Color(0xFF1E1F28),
                 disabledForegroundColor: const Color(0xFF64748B),
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               child: _activating
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Text('Activate', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Activate',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -397,7 +667,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [color.withValues(alpha: 0.08), const Color(0xFF0C0D12)]),
+        gradient: LinearGradient(
+          colors: [color.withValues(alpha: 0.08), const Color(0xFF0C0D12)],
+        ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
@@ -408,29 +680,63 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
-                child: Text('ACTIVE', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'ACTIVE',
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
               const Spacer(),
-              Text('$planLabel Plan', style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w700)),
+              Text(
+                '$planLabel Plan',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
           if (_expiresAt != null) ...[
             Row(
               children: [
-                const Icon(Icons.schedule_rounded, size: 14, color: Color(0xFF64748B)),
+                const Icon(
+                  Icons.schedule_rounded,
+                  size: 14,
+                  color: Color(0xFF64748B),
+                ),
                 const SizedBox(width: 6),
-                Text('Expires: ${_formatDate(_expiresAt!)}', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                Text(
+                  'Expires: ${_formatDate(_expiresAt!)}',
+                  style: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 4),
           ],
           Row(
             children: [
-              const Icon(Icons.devices_rounded, size: 14, color: Color(0xFF64748B)),
+              const Icon(
+                Icons.devices_rounded,
+                size: 14,
+                color: Color(0xFF64748B),
+              ),
               const SizedBox(width: 6),
-              Text(_planDeviceCount(_currentPlan), style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+              Text(
+                _planDeviceCount(_currentPlan),
+                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+              ),
             ],
           ),
         ],
@@ -448,7 +754,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
       decoration: BoxDecoration(
         color: const Color(0xFF0C0D12),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isCurrent ? planColor : const Color(0xFF1E1F28), width: isCurrent ? 1.5 : 1),
+        border: Border.all(
+          color: isCurrent ? planColor : const Color(0xFF1E1F28),
+          width: isCurrent ? 1.5 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -457,15 +766,38 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: planColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
-                child: Text(base == 'team' ? 'TEAM' : 'PRO', style: TextStyle(color: planColor, fontWeight: FontWeight.w700, fontSize: 12)),
+                decoration: BoxDecoration(
+                  color: planColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  base == 'team' ? 'TEAM' : 'PRO',
+                  style: TextStyle(
+                    color: planColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
               ),
               if (isCurrent) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: planColor.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
-                  child: Text('CURRENT', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: planColor)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: planColor.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'CURRENT',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: planColor,
+                    ),
+                  ),
                 ),
               ],
             ],
@@ -474,11 +806,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Text('License Key', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+              const Text(
+                'License Key',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 4),
-          Text('$devices — contact Seelo to purchase', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+          Text(
+            '$devices — contact Seelo to purchase',
+            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+          ),
         ],
       ),
     );
@@ -486,7 +828,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
 
   Widget _buildCancelButton() {
     if (_cancelling) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFEF4444)));
+      return const Center(
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: Color(0xFFEF4444),
+        ),
+      );
     }
     return SizedBox(
       width: double.infinity,
@@ -496,9 +843,13 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
         label: const Text('Cancel Subscription'),
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFFEF4444),
-          side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
+          side: BorderSide(
+            color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+          ),
           padding: const EdgeInsets.symmetric(vertical: 10),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       ),
     );
@@ -547,9 +898,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
               decoration: const BoxDecoration(color: Color(0xFF0C0D12)),
               children: [
                 _tableCell('Feature', isHeader: true),
-                _tableCell('Free', isHeader: true, color: const Color(0xFF666666)),
-                _tableCell('Pro', isHeader: true, color: const Color(0xFF6366F1)),
-                _tableCell('Team', isHeader: true, color: const Color(0xFF22C55E)),
+                _tableCell(
+                  'Free',
+                  isHeader: true,
+                  color: const Color(0xFF666666),
+                ),
+                _tableCell(
+                  'Pro',
+                  isHeader: true,
+                  color: const Color(0xFF6366F1),
+                ),
+                _tableCell(
+                  'Team',
+                  isHeader: true,
+                  color: const Color(0xFF22C55E),
+                ),
               ],
             ),
             ...allFeatures.asMap().entries.map((entry) {
@@ -558,7 +921,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
               final isEven = i.isEven;
               return TableRow(
                 decoration: BoxDecoration(
-                  color: isEven ? const Color(0xFF08080D) : const Color(0xFF0C0D12),
+                  color: isEven
+                      ? const Color(0xFF08080D)
+                      : const Color(0xFF0C0D12),
                 ),
                 children: [
                   _tableCell(f.$1),
@@ -578,15 +943,27 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       child: isHeader
-          ? Text(text, style: TextStyle(color: color ?? Colors.white, fontSize: 11, fontWeight: FontWeight.w700), textAlign: TextAlign.center)
-          : Text(text, style: TextStyle(
-              color: text == '✓'
-                  ? const Color(0xFF22C55E)
-                  : text == '—'
-                      ? const Color(0xFF64748B)
-                      : const Color(0xFFD1D5DB),
-              fontSize: 11,
-            ), textAlign: TextAlign.center),
+          ? Text(
+              text,
+              style: TextStyle(
+                color: color ?? Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            )
+          : Text(
+              text,
+              style: TextStyle(
+                color: text == '✓'
+                    ? const Color(0xFF22C55E)
+                    : text == '—'
+                    ? const Color(0xFF64748B)
+                    : const Color(0xFFD1D5DB),
+                fontSize: 11,
+              ),
+              textAlign: TextAlign.center,
+            ),
     );
   }
 
@@ -614,7 +991,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> with WidgetsBin
           children: [
             Icon(icon, size: 18, color: const Color(0xFF22C55E)),
             const SizedBox(width: 10),
-            Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
             const Spacer(),
             const Icon(Icons.chevron_right, size: 18, color: Color(0xFF64748B)),
           ],

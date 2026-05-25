@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
+import 'subscription_screen.dart';
+import 'auth_safe.dart';
+import 'logger.dart';
 
 const _relayUrl = 'https://seelo-relay.onrender.com';
 
@@ -19,13 +21,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   int _totalPreviews = 0;
   int _activeConnections = 0;
   bool _loading = true;
+  String? _error;
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchAnalytics();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) => _fetchAnalytics());
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _fetchAnalytics(),
+    );
   }
 
   @override
@@ -35,14 +41,24 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Future<void> _fetchAnalytics({bool retried = false}) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final user = safeCurrentUser();
+    if (user == null) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Sign in required to view analytics.';
+        });
+      }
+      return;
+    }
     try {
-      final token = await user.getIdToken();
+      final token = await user.getIdToken().timeout(
+        const Duration(seconds: 15),
+      );
       final res = await http.get(
         Uri.parse('$_relayUrl/api/analytics'),
         headers: {'Authorization': 'Bearer $token'},
-      );
+      ).timeout(const Duration(seconds: 15));
       if (res.statusCode == 401 && !retried) {
         await user.getIdToken(true);
         return _fetchAnalytics(retried: true);
@@ -54,10 +70,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           _totalPreviews = data['totalPreviews'] ?? 0;
           _activeConnections = data['activeConnections'] ?? 0;
           _loading = false;
+          _error = null;
+        });
+      } else if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Unable to load analytics right now.';
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e, st) {
+      logError(e, st);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Network error while loading analytics.';
+        });
+      }
     }
   }
 
@@ -68,13 +96,41 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0C0C0C),
       appBar: AppBar(
-        title: const Text('Analytics', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+        title: const Text(
+          'Analytics',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         backgroundColor: const Color(0xFF161616),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: _loading
-        ? const Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6366F1)))
-        : isTeam ? _buildAnalytics() : _buildLocked(),
+          ? const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF6366F1),
+              ),
+            )
+          : _error != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Color(0xFFA6A6A6),
+                    fontSize: 13,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          : isTeam
+          ? _buildAnalytics()
+          : _buildLocked(),
     );
   }
 
@@ -84,33 +140,75 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Session Stats', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          Text(
+            'Session Stats',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _statCard('Total Sessions', '$_totalSessions', Icons.bar_chart, const Color(0xFF6366F1))),
+              Expanded(
+                child: _statCard(
+                  'Total Sessions',
+                  '$_totalSessions',
+                  Icons.bar_chart,
+                  const Color(0xFF6366F1),
+                ),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: _statCard('Active Now', '$_activeConnections', Icons.wifi, const Color(0xFF22C55E))),
+              Expanded(
+                child: _statCard(
+                  'Active Now',
+                  '$_activeConnections',
+                  Icons.wifi,
+                  const Color(0xFF22C55E),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _statCard('Previews Sent', '$_totalPreviews', Icons.remove_red_eye, const Color(0xFFF59E0B))),
+              Expanded(
+                child: _statCard(
+                  'Previews Sent',
+                  '$_totalPreviews',
+                  Icons.remove_red_eye,
+                  const Color(0xFFF59E0B),
+                ),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: _statCard('Devices', '$_activeConnections', Icons.devices, const Color(0xFFEC4899))),
+              Expanded(
+                child: _statCard(
+                  'Devices',
+                  '$_activeConnections',
+                  Icons.devices,
+                  const Color(0xFFEC4899),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 20),
-          Text('Recent Activity', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          Text(
+            'Recent Activity',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(24),
             alignment: Alignment.center,
             child: Text(
               _totalSessions > 0
-                ? 'Session data is updated in real-time as you use Seelo'
-                : 'No sessions yet — connect a device to get started',
+                  ? 'Session data is updated in real-time as you use Seelo'
+                  : 'No sessions yet — connect a device to get started',
               style: const TextStyle(color: Color(0xFFA6A6A6), fontSize: 13),
               textAlign: TextAlign.center,
             ),
@@ -128,24 +226,55 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 64, height: 64,
-              decoration: BoxDecoration(color: const Color(0x1E6366F1), borderRadius: BorderRadius.circular(16)),
-              child: const Icon(Icons.analytics_outlined, color: Color(0xFF6366F1), size: 30),
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: const Color(0x1E6366F1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(
+                Icons.analytics_outlined,
+                color: Color(0xFF6366F1),
+                size: 30,
+              ),
             ),
             const SizedBox(height: 16),
-            const Text('Analytics Locked', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+            const Text(
+              'Analytics Locked',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 6),
-            const Text('Upgrade to Team plan to view usage analytics across your sessions.', style: TextStyle(color: Color(0xFFA6A6A6), fontSize: 13), textAlign: TextAlign.center),
+            const Text(
+              'Upgrade to Team plan to view usage analytics across your sessions.',
+              style: TextStyle(color: Color(0xFFA6A6A6), fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 16),
             TextButton(
-              onPressed: () {},
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+                );
+              },
               style: TextButton.styleFrom(
                 backgroundColor: const Color(0xFF6366F1),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              child: const Text('Upgrade', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              child: const Text(
+                'Upgrade',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
             ),
           ],
         ),
@@ -168,11 +297,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             children: [
               Icon(icon, color: color, size: 14),
               const SizedBox(width: 6),
-              Text(label, style: const TextStyle(color: Color(0xFFA6A6A6), fontSize: 11)),
+              Text(
+                label,
+                style: const TextStyle(color: Color(0xFFA6A6A6), fontSize: 11),
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(value, style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700, height: 1)),
+          Text(
+            value,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
         ],
       ),
     );

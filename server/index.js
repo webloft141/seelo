@@ -270,6 +270,7 @@ io.on('connection', (socket) => {
     }
 
     socket.join(roomId);
+    socket._currentRoom = roomId; // track for disconnect cleanup
     logger.info(`Client ${socket.id} joined room ${roomId} as ${role || 'unknown'}`);
 
     if (role === 'mobile') {
@@ -368,9 +369,15 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('full-export-data', data);
   });
 
-  // ── Ping/pong for mobile latency ───────────────────────────────────
+  // ── Latency probe for mobile viewer ────────────────────────────────
+  socket.on('latency-probe', (data) => {
+    const ts = data && typeof data.ts === 'number' ? data.ts : Date.now();
+    socket.emit('latency-ack', { ts });
+  });
+  // Backward compatibility with older mobile clients.
   socket.on('ping', (data) => {
-    socket.emit('pong', { ts: data?.ts || Date.now() });
+    const ts = data && typeof data.ts === 'number' ? data.ts : Date.now();
+    socket.emit('pong', { ts });
   });
 
   // ── Login ──────────────────────────────────────────────────────────
@@ -403,11 +410,10 @@ io.on('connection', (socket) => {
     try {
       const session = stmts.deleteSession.run(socket.id);
       if (session.changes > 0) {
-        for (const room of socket.rooms) {
-          if (room !== socket.id) {
-            socket.to(room).emit('mobile-disconnected', socket.id);
-            _emitMobileList(room);
-          }
+        const roomId = socket._currentRoom;
+        if (roomId) {
+          socket.to(roomId).emit('mobile-disconnected', socket.id);
+          _emitMobileList(roomId);
         }
       }
     } catch (err) {

@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -12,12 +13,19 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
 import 'auth_screen.dart';
-import 'subscription_screen.dart';
+import 'auth_safe.dart';
+import 'logger.dart';
 import 'premium.dart';
 import 'device_manager_screen.dart';
+import 'subscription_screen.dart';
+import 'profile_screen.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter/services.dart';
-import 'bluetooth_discovery_screen.dart';
+import 'quick_pairing_screen.dart';
+
+part 'home_screen.dart';
+part 'settings_screen.dart';
+part 'connected_devices_screen.dart';
 
 enum ConnectionQuality { disconnected, poor, fair, good }
 
@@ -60,8 +68,9 @@ void main() async {
     FirebaseAuth.instance.authStateChanges().listen((_) {
       PremiumManager.syncFromServer().catchError((_) {});
     });
-  } catch (_) {
-    // Firebase not configured — auth disabled
+  } catch (e, st) {
+    SeeloConfig.firebaseAvailable = false;
+    logError(e, st);
   }
   runApp(const SeeloApp());
 }
@@ -74,6 +83,17 @@ class SeeloConfig {
   int reconnectAttempts = 20;
   int reconnectDelay = 800;
   int connectTimeout = 10000;
+  static bool firebaseAvailable = true;
+
+  static final ValueNotifier<bool> darkMode = ValueNotifier(false);
+  static final ValueNotifier<bool> compactMode = ValueNotifier(false);
+  static final ValueNotifier<bool> showDebugErrorBoxes = ValueNotifier(true);
+  static double gap({double normal = 24, double compact = 12}) =>
+      compactMode.value ? compact : normal;
+  static double smGap({double normal = 16, double compact = 8}) =>
+      compactMode.value ? compact : normal;
+  static double cardPad({double normal = 24, double compact = 16}) =>
+      compactMode.value ? compact : normal;
 
   static final SeeloConfig _instance = SeeloConfig._();
   factory SeeloConfig() => _instance;
@@ -88,19 +108,21 @@ class SeeloApp extends StatefulWidget {
 }
 
 class _SeeloAppState extends State<SeeloApp> {
-  bool _firebaseReady = false;
-  User? _user;
   StreamSubscription? _authSub;
+  AuthService? _authService;
 
   @override
   void initState() {
     super.initState();
+    if (!SeeloConfig.firebaseAvailable) return;
     try {
-      _authSub = AuthService().authState.listen(
-        (u) => setState(() => _user = u),
+      _authService = AuthService();
+      _authSub = _authService!.authState.listen(
+        (_) => setState(() {}),
       );
-      _firebaseReady = true;
-    } catch (_) {}
+    } catch (e, st) {
+      logError(e, st);
+    }
   }
 
   @override
@@ -111,21 +133,73 @@ class _SeeloAppState extends State<SeeloApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Seelo',
-      debugShowCheckedModeBanner: false,
-      home: _firebaseReady
-          ? (_user != null ? const SplashScreen() : const AuthScreen())
-          : const SplashScreen(),
-      theme: ThemeData(
-        scaffoldBackgroundColor: const Color(0xFF0C0C0C),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0C0C0C),
-          surfaceTintColor: Colors.transparent,
-          elevation: 0,
-          foregroundColor: Colors.white,
-        ),
-      ),
+    return ValueListenableBuilder<bool>(
+      valueListenable: SeeloConfig.showDebugErrorBoxes,
+      builder: (_, showDebugErrors, _) {
+        // Lets users hide noisy red error widgets during preview in debug builds.
+        if (kDebugMode && !showDebugErrors) {
+          ErrorWidget.builder = (FlutterErrorDetails details) => Container(
+            color: const Color(0xFFF9F9F9),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.all(16),
+            child: const Text(
+              'A preview error was hidden. Enable "Debug Error Boxes" in Settings to view details.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xFF626262),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          );
+        } else {
+          ErrorWidget.builder = (FlutterErrorDetails details) =>
+              ErrorWidget.withDetails(message: details.exceptionAsString());
+        }
+        return ValueListenableBuilder<bool>(
+          valueListenable: SeeloConfig.darkMode,
+          builder: (_, isDark, _) {
+            return MaterialApp(
+              title: 'Seelo',
+              debugShowCheckedModeBanner: false,
+              home: SeeloConfig.firebaseAvailable && safeCurrentUser() == null
+                  ? const AuthScreen()
+                  : const SplashScreen(),
+              theme: ThemeData(
+                scaffoldBackgroundColor: const Color(0xFFF9F9F9),
+                appBarTheme: const AppBarTheme(
+                  backgroundColor: Color(0xFFF9F9F9),
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  foregroundColor: Color(0xFF1A1C1C),
+                ),
+                colorScheme: const ColorScheme.light(
+                  primary: Color(0xFF000000),
+                  onPrimary: Color(0xFFFFFFFF),
+                  surface: Color(0xFFF9F9F9),
+                  onSurface: Color(0xFF1A1C1C),
+                ),
+              ),
+              darkTheme: ThemeData(
+                scaffoldBackgroundColor: const Color(0xFF0C0C0C),
+                appBarTheme: const AppBarTheme(
+                  backgroundColor: Color(0xFF0C0C0C),
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  foregroundColor: Color(0xFFF3F3F3),
+                ),
+                colorScheme: const ColorScheme.dark(
+                  primary: Color(0xFFFFFFFF),
+                  onPrimary: Color(0xFF000000),
+                  surface: Color(0xFF0C0C0C),
+                  onSurface: Color(0xFFF3F3F3),
+                ),
+              ),
+              themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -323,6 +397,10 @@ class SeeloConnectionController {
   final ValueNotifier<List<DesignIssue>> issues = ValueNotifier([]);
   final ValueNotifier<int> viewerCount = ValueNotifier(0);
   final ValueNotifier<String?> lastError = ValueNotifier<String?>(null);
+  final ValueNotifier<List<Map<String, dynamic>>> frameGallery = ValueNotifier(
+    [],
+  );
+  final ValueNotifier<List<Map<String, dynamic>>> notes = ValueNotifier([]);
   final List<SessionEntry> sessionHistory = [];
   final List<DevicePreset> customPresets = [];
 
@@ -330,8 +408,7 @@ class SeeloConnectionController {
   Timer? _pingTimer;
   void Function(int max, int current)? _onRoomFull;
   int _reconnectCount = 0;
-  int _latencySum = 0;
-  int _latencySamples = 0;
+  double _latencyEma = 0;
 
   static const int _maxSavedDevices = 5;
 
@@ -441,7 +518,9 @@ class SeeloConnectionController {
           payload['uid'] = user.uid;
           payload['idToken'] = await user.getIdToken();
         }
-      } catch (_) {}
+      } catch (e, st) {
+        logError(e, st);
+      }
       socket.emit('join-session', payload);
       onConnected?.call();
       onStatus?.call('Cloud connected');
@@ -452,6 +531,13 @@ class SeeloConnectionController {
       try {
         final design = payload is Map ? payload : null;
         if (design is Map) {
+          if (design['frameGallery'] is List) {
+            frameGallery.value = List<Map<String, dynamic>>.from(
+              (design['frameGallery'] as List).map(
+                (e) => Map<String, dynamic>.from(e as Map),
+              ),
+            );
+          }
           final imageData = design['imageData'];
           final newId = design['id']?.toString();
           if (imageData is String && imageData.startsWith('data:image')) {
@@ -486,7 +572,9 @@ class SeeloConnectionController {
             imageVersion.value++;
           }
         }
-      } catch (_) {}
+      } catch (e, st) {
+        logError(e, st);
+      }
       _designTimeout?.cancel();
       onStatus?.call('Preview synced');
     });
@@ -525,6 +613,46 @@ class SeeloConnectionController {
       onStatus?.call(msg);
     });
 
+    socket.on('frame-list', (data) {
+      if (_disposed) return;
+      if (data is Map && data['frames'] is List) {
+        frameGallery.value = List<Map<String, dynamic>>.from(
+          data['frames'].map((e) => Map<String, dynamic>.from(e)),
+        );
+      } else if (data is List) {
+        frameGallery.value = List<Map<String, dynamic>>.from(
+          data.map((e) => Map<String, dynamic>.from(e)),
+        );
+      }
+    });
+
+    socket.on('note-added', (data) {
+      if (_disposed) return;
+      if (data is Map && data['note'] is Map) {
+        final list = List<Map<String, dynamic>>.from(notes.value);
+        list.add(Map<String, dynamic>.from(data['note']));
+        notes.value = list;
+      }
+    });
+
+    socket.on('existing-notes', (data) {
+      if (_disposed) return;
+      if (data is Map && data['notes'] is List) {
+        notes.value = List<Map<String, dynamic>>.from(
+          data['notes'].map((e) => Map<String, dynamic>.from(e)),
+        );
+      }
+    });
+
+    socket.on('note-deleted', (data) {
+      if (_disposed) return;
+      if (data is Map && data['noteId'] != null) {
+        notes.value = notes.value
+            .where((n) => n['id']?.toString() != data['noteId'].toString())
+            .toList();
+      }
+    });
+
     socket.on('server-shutdown', (_) {
       if (_disposed) return;
       onStatus?.call('Server restarting...');
@@ -536,7 +664,7 @@ class SeeloConnectionController {
       connecting = false;
       _reconnectCount++;
       connectionQuality.value = ConnectionQuality.poor;
-      debugPrint('Seelo cloud connectError: $err');
+      logMessage('Seelo cloud connectError: $err');
       onError?.call('Cloud connection error: $err');
       onStatus?.call('Retrying ($_reconnectCount)');
     });
@@ -560,7 +688,9 @@ class SeeloConnectionController {
           payload['uid'] = user.uid;
           payload['idToken'] = await user.getIdToken();
         }
-      } catch (_) {}
+      } catch (e, st) {
+        logError(e, st);
+      }
       socket.emit('join-session', payload);
       onStatus?.call('Reconnected');
     });
@@ -637,7 +767,9 @@ class SeeloConnectionController {
           payload['uid'] = user.uid;
           payload['idToken'] = await user.getIdToken();
         }
-      } catch (_) {}
+      } catch (e, st) {
+        logError(e, st);
+      }
       socket.emit('join-session', payload);
     }
 
@@ -645,8 +777,7 @@ class SeeloConnectionController {
       if (_disposed) return;
       serverLabel = '$ip:$port';
       _reconnectCount = 0;
-      _latencySum = 0;
-      _latencySamples = 0;
+      _latencyEma = 0;
       connectionQuality.value = ConnectionQuality.good;
       _saveDevice(ip, port);
       sessionHistory.insert(
@@ -665,6 +796,13 @@ class SeeloConnectionController {
       try {
         final design = payload is Map ? payload['design'] : null;
         if (design is Map) {
+          if (design['frameGallery'] is List) {
+            frameGallery.value = List<Map<String, dynamic>>.from(
+              (design['frameGallery'] as List).map(
+                (e) => Map<String, dynamic>.from(e as Map),
+              ),
+            );
+          }
           final imageData = design['imageData'];
           final newId = design['id']?.toString();
           // Frame dedup: skip re-render if same frame ID
@@ -707,7 +845,9 @@ class SeeloConnectionController {
             _detectIssues();
           }
         }
-      } catch (_) {}
+      } catch (e, st) {
+        logError(e, st);
+      }
       _designTimeout?.cancel();
       onStatus?.call('Preview synced');
     });
@@ -718,6 +858,46 @@ class SeeloConnectionController {
           ? (payload['message'] ?? 'Server error').toString()
           : 'Server error';
       onError?.call(msg);
+    });
+
+    socket.on('frame-list', (data) {
+      if (_disposed) return;
+      if (data is Map && data['frames'] is List) {
+        frameGallery.value = List<Map<String, dynamic>>.from(
+          data['frames'].map((e) => Map<String, dynamic>.from(e)),
+        );
+      } else if (data is List) {
+        frameGallery.value = List<Map<String, dynamic>>.from(
+          data.map((e) => Map<String, dynamic>.from(e)),
+        );
+      }
+    });
+
+    socket.on('note-added', (data) {
+      if (_disposed) return;
+      if (data is Map && data['note'] is Map) {
+        final list = List<Map<String, dynamic>>.from(notes.value);
+        list.add(Map<String, dynamic>.from(data['note']));
+        notes.value = list;
+      }
+    });
+
+    socket.on('existing-notes', (data) {
+      if (_disposed) return;
+      if (data is Map && data['notes'] is List) {
+        notes.value = List<Map<String, dynamic>>.from(
+          data['notes'].map((e) => Map<String, dynamic>.from(e)),
+        );
+      }
+    });
+
+    socket.on('note-deleted', (data) {
+      if (_disposed) return;
+      if (data is Map && data['noteId'] != null) {
+        notes.value = notes.value
+            .where((n) => n['id']?.toString() != data['noteId'].toString())
+            .toList();
+      }
     });
 
     socket.on('server-shutdown', (_) {
@@ -731,7 +911,7 @@ class SeeloConnectionController {
       connecting = false;
       _reconnectCount++;
       connectionQuality.value = ConnectionQuality.poor;
-      debugPrint('Seelo desktop connectError: $err');
+      logMessage('Seelo desktop connectError: $err');
       onError?.call('Desktop connection error: $err');
       onStatus?.call('Retrying ($_reconnectCount)');
     });
@@ -897,26 +1077,51 @@ class SeeloConnectionController {
 
   void _startPing() {
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!isConnected || _disposed) return;
-      _socket!.emit('ping', {'ts': DateTime.now().millisecondsSinceEpoch});
+      _socket!.emit('latency-probe', {
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      });
+    });
+    _socket!.off('latency-ack');
+    _socket!.on('latency-ack', (data) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final serverTs = (data is Map) ? data['ts'] : data;
+      if (serverTs is! num) return;
+      final ms = now - serverTs.toInt();
+      if (ms < 0 || ms > 3000) return; // ignore clock glitches or stale replies
+      if (_latencyEma == 0) {
+        _latencyEma = ms.toDouble();
+      } else {
+        _latencyEma = (_latencyEma * 0.75) + (ms * 0.25);
+      }
+      final smooth = _latencyEma.round();
+      latencyMs.value = smooth;
+      connectionQuality.value = smooth < 40
+          ? ConnectionQuality.good
+          : smooth < 120
+          ? ConnectionQuality.fair
+          : ConnectionQuality.poor;
     });
     _socket!.off('pong');
     _socket!.on('pong', (data) {
       final now = DateTime.now().millisecondsSinceEpoch;
       final serverTs = (data is Map) ? data['ts'] : data;
-      if (serverTs is int) {
-        final ms = now - serverTs;
-        _latencySum += ms;
-        _latencySamples++;
-        final avg = _latencySum ~/ _latencySamples;
-        latencyMs.value = avg;
-        connectionQuality.value = avg < 50
-            ? ConnectionQuality.good
-            : avg < 150
-            ? ConnectionQuality.fair
-            : ConnectionQuality.poor;
+      if (serverTs is! num) return;
+      final ms = now - serverTs.toInt();
+      if (ms < 0 || ms > 3000) return;
+      if (_latencyEma == 0) {
+        _latencyEma = ms.toDouble();
+      } else {
+        _latencyEma = (_latencyEma * 0.75) + (ms * 0.25);
       }
+      final smooth = _latencyEma.round();
+      latencyMs.value = smooth;
+      connectionQuality.value = smooth < 40
+          ? ConnectionQuality.good
+          : smooth < 120
+          ? ConnectionQuality.fair
+          : ConnectionQuality.poor;
     });
   }
 
@@ -943,6 +1148,16 @@ class SeeloConnectionController {
     });
   }
 
+  void requestFrameSelect(String frameId) {
+    if (!isConnected) return;
+    _socket!.emit('frame-select', {'frameId': frameId, 'sessionId': roomId});
+  }
+
+  void addNote(Map<String, dynamic> note) {
+    if (!isConnected) return;
+    _socket!.emit('add-note', {'note': note, 'sessionId': roomId});
+  }
+
   void disconnect() {
     _designTimeout?.cancel();
     _pingTimer?.cancel();
@@ -956,6 +1171,8 @@ class SeeloConnectionController {
     serverLabel = 'Not connected';
     connectionQuality.value = ConnectionQuality.disconnected;
     latencyMs.value = 0;
+    frameGallery.value = [];
+    notes.value = [];
   }
 }
 
@@ -972,9 +1189,20 @@ class _SplashScreenState extends State<SplashScreen> {
     super.initState();
     Future.delayed(const Duration(seconds: 2), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-      );
+      final nav = Navigator.of(context);
+      if (safeCurrentUser() != null) {
+        nav.pushReplacement(
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+        );
+      } else if (SeeloConfig.firebaseAvailable) {
+        nav.pushReplacement(
+          MaterialPageRoute(builder: (_) => const AuthScreen()),
+        );
+      } else {
+        nav.pushReplacement(
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+        );
+      }
     });
   }
 
@@ -1007,26 +1235,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _controller = PageController();
   int _index = 0;
 
-  static const slides = [
-    (
+  static const _slides = [
+    _SlideData(
+      icon: Icons.design_services_outlined,
       title: 'Live Figma Preview',
-      body: 'See your Figma frames live on phone with low-latency local sync.',
-    ),
-    (
-      title: 'Quick Pairing',
-      body: 'Scan desktop QR to connect instantly over same Wi-Fi.',
-    ),
-    (
-      title: 'Swipe And Review',
       body:
-          'Swipe left-right for pages and scroll vertically for long screens.',
+          'Experience your Figma frames live on your phone with real-time local sync.',
+    ),
+    _SlideData(
+      icon: Icons.bluetooth_searching_rounded,
+      title: 'Quick Pairing',
+      body: 'Bluetooth discovery for instant connection to your desktop app.',
+    ),
+    _SlideData(
+      icon: Icons.swipe_rounded,
+      title: 'Swipe And Review',
+      body: 'Navigate pages left-right and scroll vertically for long screens.',
     ),
   ];
 
   void _finish() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => HomeScreen(controller: SeeloConnectionController()),
+        builder: (_) =>
+            SeeloHomeScreen(controller: SeeloConnectionController()),
       ),
     );
   }
@@ -1034,95 +1266,138 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF9F9F9),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(24),
           child: Column(
             children: [
+              // Step progress
+              Text(
+                'STEP ${_index + 1} OF ${_slides.length}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.5,
+                  color: Color(0xFF626262),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Progress bar
+              Container(
+                height: 2,
+                decoration: const BoxDecoration(color: Color(0xFFEEEEEE)),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    height: 2,
+                    width:
+                        (MediaQuery.of(context).size.width - 48) *
+                        ((_index + 1) / _slides.length),
+                    color: const Color(0xFF000000),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 48),
+              // Slides
               Expanded(
                 child: PageView.builder(
                   controller: _controller,
-                  itemCount: slides.length,
-                  onPageChanged: (value) => setState(() => _index = value),
+                  itemCount: _slides.length,
+                  onPageChanged: (v) => setState(() => _index = v),
                   itemBuilder: (_, i) {
-                    final slide = slides[i];
-                    return Container(
-                      margin: const EdgeInsets.symmetric(vertical: 12),
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: AppPalette.card,
-                        border: Border.all(color: AppPalette.border),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            slide.title,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: AppPalette.text,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w700,
-                            ),
+                    final s = _slides[i];
+                    return Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 88,
+                          height: 88,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF000000),
                           ),
-                          const SizedBox(height: 16),
-                          Text(
-                            slide.body,
+                          child: Icon(
+                            s.icon,
+                            color: const Color(0xFFFFFFFF),
+                            size: 40,
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                        Text(
+                          s.title,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1A1C1C),
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            s.body,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
-                              color: AppPalette.dim,
                               fontSize: 15,
-                              height: 1.4,
+                              color: Color(0xFF626262),
+                              height: 1.5,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     );
                   },
                 ),
               ),
+              // Pagination dots
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(
-                  slides.length,
+                  _slides.length,
                   (i) => Container(
                     margin: const EdgeInsets.symmetric(horizontal: 4),
-                    width: i == _index ? 18 : 8,
-                    height: 8,
+                    width: i == _index ? 24 : 6,
+                    height: 6,
                     decoration: BoxDecoration(
                       color: i == _index
-                          ? Colors.white
-                          : const Color(0xFF4A4A4A),
-                      borderRadius: BorderRadius.circular(999),
+                          ? const Color(0xFF000000)
+                          : const Color(0xFFEEEEEE),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+              const SizedBox(height: 32),
+              // Button
+              GestureDetector(
+                onTap: () {
+                  HapticFeedback.mediumImpact();
+                  if (_index < _slides.length - 1) {
+                    _controller.nextPage(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                    );
+                  } else {
+                    _finish();
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF000000),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  onPressed: () {
-                    if (_index < slides.length - 1) {
-                      _controller.nextPage(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOut,
-                      );
-                    } else {
-                      _finish();
-                    }
-                  },
                   child: Text(
-                    _index < slides.length - 1 ? 'Next' : 'Get Started',
+                    _index < _slides.length - 1 ? 'NEXT' : 'GET STARTED',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                      color: Color(0xFFFFFFFF),
+                    ),
                   ),
                 ),
               ),
@@ -1134,843 +1409,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.controller});
-
-  final SeeloConnectionController controller;
-
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  final TextEditingController _linkController = TextEditingController();
-  String _status = 'Idle';
-  String _error = '';
-
-  @override
-  void dispose() {
-    _linkController.dispose();
-    widget.controller.dispose();
-    super.dispose();
-  }
-
-  void _openPreview() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PreviewScreen(controller: widget.controller),
-      ),
-    );
-  }
-
-  void _scanAndConnect() {
-    Navigator.of(context)
-        .push<Map<String, dynamic>>(
-          MaterialPageRoute(builder: (_) => const QrScanScreen()),
-        )
-        .then((payload) {
-          if (!mounted || payload == null) return;
-          setState(() => _error = '');
-          widget.controller.connectWithPayload(
-            payload: payload,
-            onConnected: _openPreview,
-            onError: (msg) {
-              if (mounted) setState(() => _error = msg);
-            },
-            onStatus: (msg) {
-              if (mounted) setState(() => _status = msg);
-            },
-          );
-        });
-  }
-
-  void _bluetoothDiscover() {
-    Navigator.of(context)
-        .push<Map<String, dynamic>>(
-          MaterialPageRoute(builder: (_) => const BluetoothDiscoveryScreen()),
-        )
-        .then((payload) {
-          if (!mounted || payload == null) return;
-          setState(() => _error = '');
-          widget.controller.connectWithPayload(
-            payload: payload,
-            onConnected: _openPreview,
-            onError: (msg) {
-              if (mounted) setState(() => _error = msg);
-            },
-            onStatus: (msg) {
-              if (mounted) setState(() => _status = msg);
-            },
-          );
-        });
-  }
-
-  void _manualConnect() {
-    final text = _linkController.text.trim();
-    if (text.isEmpty) return;
-
-    Uri? uri;
-    try {
-      uri = Uri.parse(text.startsWith('http') ? text : 'http://$text');
-    } catch (_) {}
-
-    if (uri == null || uri.host.isEmpty) {
-      setState(
-        () => _error = 'Invalid server address. Use ip:port or http://ip:port',
-      );
-      return;
-    }
-
-    setState(() => _error = '');
-    widget.controller.connectWithPayload(
-      payload: {
-        'ip': uri.host,
-        'port': uri.port.toString(),
-        'roomId': SeeloConfig().defaultRoomId,
-      },
-      onConnected: _openPreview,
-      onError: (msg) {
-        if (mounted) setState(() => _error = msg);
-      },
-      onStatus: (msg) {
-        if (mounted) setState(() => _status = msg);
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Seelo',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        actions: [
-          ValueListenableBuilder<ConnectionQuality>(
-            valueListenable: widget.controller.connectionQuality,
-            builder: (_, q, _) {
-              final dotColor = q == ConnectionQuality.good
-                  ? const Color(0xFF22C55E)
-                  : q == ConnectionQuality.fair
-                  ? const Color(0xFFEAB308)
-                  : q == ConnectionQuality.poor
-                  ? const Color(0xFFEF4444)
-                  : AppPalette.dim;
-              return Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Tooltip(
-                  message: q == ConnectionQuality.disconnected
-                      ? 'Disconnected'
-                      : widget.controller.serverLabel,
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    margin: const EdgeInsets.only(right: 4),
-                    decoration: BoxDecoration(
-                      color: dotColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-            );
-          },
-          ),
-          IconButton(
-            icon: const Icon(Icons.workspace_premium, color: Color(0xFF6366F1)),
-            tooltip: 'Plans',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.white70),
-            onPressed: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white38, size: 20),
-            onPressed: () async {
-              try {
-                await AuthService().signOut();
-              } catch (_) {}
-            },
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _card(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Manual Connect', style: _h),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _linkController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'Server address (e.g. 192.168.1.5:3000)',
-                      hintStyle: const TextStyle(color: AppPalette.dim),
-                      filled: true,
-                      fillColor: AppPalette.cardSoft,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: AppPalette.border),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: AppPalette.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Colors.white70),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: _manualConnect,
-                      child: const Text('Connect'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            _card(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Quick Pairing', style: _h),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Scan desktop QR to connect instantly.',
-                    style: TextStyle(color: AppPalette.dim),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: _scanAndConnect,
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Open QR Scanner'),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Color(0xFF6366F1)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: _bluetoothDiscover,
-                      icon: const Icon(Icons.bluetooth, size: 20),
-                      label: const Text('Discover via Bluetooth'),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  ValueListenableBuilder<ConnectionQuality>(
-                    valueListenable: widget.controller.connectionQuality,
-                    builder: (_, q, _) {
-                      final dotColor = q == ConnectionQuality.good
-                          ? const Color(0xFF22C55E)
-                          : q == ConnectionQuality.fair
-                          ? const Color(0xFFEAB308)
-                          : q == ConnectionQuality.poor
-                          ? const Color(0xFFEF4444)
-                          : AppPalette.dim;
-                      return Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            margin: const EdgeInsets.only(right: 6),
-                            decoration: BoxDecoration(
-                              color: dotColor,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          Text(
-                            'Status: $_status',
-                            style: const TextStyle(
-                              color: AppPalette.text,
-                              fontSize: 13,
-                            ),
-                          ),
-                          if (widget.controller.connecting)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 8),
-                              child: SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ),
-                        ],
-                      );
-                    },
-                  ),
-                  if (_error.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: Colors.red.withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: Text(
-                          _error,
-                          style: const TextStyle(
-                            color: Color(0xFFF5A0A0),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            // Saved devices
-            ValueListenableBuilder<List<SavedDevice>>(
-              valueListenable: widget.controller.savedDevices,
-              builder: (_, devices, _) {
-                if (devices.isEmpty) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: _card(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Text('Saved Devices', style: _h),
-                            const Spacer(),
-                            GestureDetector(
-                              onTap: () {
-                                final list = List<SavedDevice>.from(devices);
-                                list.clear();
-                                widget.controller.savedDevices.value = list;
-                              },
-                              child: const Text(
-                                'Clear',
-                                style: TextStyle(
-                                  color: AppPalette.dim,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        ...List.generate(devices.length, (i) {
-                          final d = devices[i];
-                          return InkWell(
-                            onTap: () {
-                              widget.controller.connectToSaved(d);
-                              _openPreview();
-                            },
-                            borderRadius: BorderRadius.circular(8),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.computer,
-                                    color: AppPalette.dim,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          d.displayLabel,
-                                          style: const TextStyle(
-                                            color: AppPalette.text,
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                        Text(
-                                          d.roomId,
-                                          style: const TextStyle(
-                                            color: AppPalette.dim,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const Icon(
-                                    Icons.chevron_right,
-                                    color: AppPalette.dim,
-                                    size: 18,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends State<SettingsScreen> {
-  late TextEditingController _widthC;
-  late TextEditingController _heightC;
-  late TextEditingController _roomC;
-  late TextEditingController _portC;
-
-  @override
-  void initState() {
-    super.initState();
-    final c = SeeloConfig();
-    _widthC = TextEditingController(text: c.screenWidth.toString());
-    _heightC = TextEditingController(text: c.screenHeight.toString());
-    _roomC = TextEditingController(text: c.defaultRoomId);
-    _portC = TextEditingController(text: c.defaultPort.toString());
-  }
-
-  @override
-  void dispose() {
-    _widthC.dispose();
-    _heightC.dispose();
-    _roomC.dispose();
-    _portC.dispose();
-    super.dispose();
-  }
-
-  void _save() {
-    final c = SeeloConfig();
-    c.screenWidth = int.tryParse(_widthC.text) ?? c.screenWidth;
-    c.screenHeight = int.tryParse(_heightC.text) ?? c.screenHeight;
-    c.defaultRoomId = _roomC.text.trim().isEmpty
-        ? c.defaultRoomId
-        : _roomC.text.trim();
-    c.defaultPort = int.tryParse(_portC.text) ?? c.defaultPort;
-    Navigator.of(context).pop();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Settings saved'),
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _card(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Preview Size', style: _h),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Default screen dimensions for preview.',
-                    style: TextStyle(color: AppPalette.dim, fontSize: 13),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _widthC,
-                          keyboardType: TextInputType.number,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: _inputDeco('Width (px)'),
-                        ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          '\u00D7',
-                          style: TextStyle(color: AppPalette.dim, fontSize: 18),
-                        ),
-                      ),
-                      Expanded(
-                        child: TextField(
-                          controller: _heightC,
-                          keyboardType: TextInputType.number,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: _inputDeco('Height (px)'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            _card(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Connection', style: _h),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _roomC,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _inputDeco('Default Room ID'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _portC,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _inputDeco('Default Port'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onPressed: _save,
-                child: const Text('Save Settings'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-InputDecoration _inputDeco(String hint) {
-  return InputDecoration(
-    hintText: hint,
-    hintStyle: const TextStyle(color: AppPalette.dim),
-    filled: true,
-    fillColor: AppPalette.cardSoft,
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: AppPalette.border),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: AppPalette.border),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: Colors.white70),
-    ),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-  );
-}
-
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.controller});
-
-  final SeeloConnectionController controller;
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _email = TextEditingController();
-  final TextEditingController _password = TextEditingController();
-  String _error = '';
-
-  @override
-  void dispose() {
-    _email.dispose();
-    _password.dispose();
-    super.dispose();
-  }
-
-  void _quickLoginQr() {
-    Navigator.of(context)
-        .push<Map<String, dynamic>>(
-          MaterialPageRoute(builder: (_) => const QrScanScreen()),
-        )
-        .then((payload) {
-          if (!mounted || payload == null) return;
-          widget.controller.connectWithPayload(
-            payload: payload,
-            onConnected: () {
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) => PreviewScreen(controller: widget.controller),
-                ),
-              );
-            },
-            onError: (msg) {
-              if (mounted) setState(() => _error = msg);
-            },
-          );
-        });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Login')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _card(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Account Login', style: _h),
-                  const SizedBox(height: 12),
-                  _input(_email, 'Email'),
-                  const SizedBox(height: 10),
-                  _input(_password, 'Password', obscure: true),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: () async {
-                        try {
-                          await FirebaseAuth.instance
-                              .signInWithEmailAndPassword(
-                                email: _email.text.trim(),
-                                password: _password.text,
-                              );
-                          if (!context.mounted) return;
-                          Navigator.of(context).pop();
-                        } on FirebaseAuthException catch (e) {
-                          setState(() {
-                            _error = e.code == 'user-not-found'
-                                ? 'No account found'
-                                : e.code == 'wrong-password'
-                                ? 'Incorrect password'
-                                : e.code == 'invalid-credential'
-                                ? 'Invalid email or password'
-                                : e.code == 'too-many-requests'
-                                ? 'Too many attempts'
-                                : e.message ?? 'Login failed';
-                          });
-                        }
-                      },
-                      child: const Text('Login'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            _card(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Quick Login via Desktop QR', style: _h),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Scan QR from desktop app and login instantly.',
-                    style: TextStyle(color: AppPalette.dim),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: AppPalette.border),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: _quickLoginQr,
-                      icon: const Icon(Icons.qr_code),
-                      label: const Text('Scan For Quick Login'),
-                    ),
-                  ),
-                  if (_error.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      _error,
-                      style: const TextStyle(color: Color(0xFFD3D3D3)),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _input(TextEditingController c, String hint, {bool obscure = false}) {
-    return TextField(
-      controller: c,
-      obscureText: obscure,
-      style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: AppPalette.dim),
-        filled: true,
-        fillColor: AppPalette.cardSoft,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppPalette.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppPalette.border),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.white70),
-        ),
-      ),
-    );
-  }
-}
-
-class QrScanScreen extends StatefulWidget {
-  const QrScanScreen({super.key});
-
-  @override
-  State<QrScanScreen> createState() => _QrScanScreenState();
-}
-
-class _QrScanScreenState extends State<QrScanScreen> {
-  bool _busy = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          MobileScanner(
-            onDetect: (capture) {
-              if (_busy) return;
-              final raw = capture.barcodes.first.rawValue;
-              if (raw == null) return;
-              try {
-                final map = jsonDecode(raw) as Map<String, dynamic>;
-                _busy = true;
-                Navigator.of(context).pop(map);
-              } catch (_) {
-                setState(() => _busy = true);
-                Future.delayed(const Duration(milliseconds: 800), () {
-                  if (!mounted) return;
-                  setState(() => _busy = false);
-                });
-              }
-            },
-          ),
-          Container(
-            color: Colors.black45,
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 260,
-                    height: 260,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.white, width: 2),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Scan desktop QR',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white60),
-                    ),
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Back'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+class _SlideData {
+  final IconData icon;
+  final String title;
+  final String body;
+  const _SlideData({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
 }
 
 enum DisplayMode { fitToScreen, pixelPerfect }
@@ -2005,7 +1452,7 @@ class _PreviewScreenState extends State<PreviewScreen>
   List<Offset> _measurePoints = [];
   bool _wasInBackground = false;
   Timer? _toolbarTimer;
-  DisplayMode _displayMode = DisplayMode.fitToScreen;
+  DisplayMode _displayMode = DisplayMode.pixelPerfect;
   DevicePreset _selectedPreset = builtInPresets[0];
   final TransformationController _transformationController =
       TransformationController();
@@ -2163,8 +1610,10 @@ class _PreviewScreenState extends State<PreviewScreen>
     if (magnitude < 25) return;
 
     final now = DateTime.now();
-    if (_lastShake != null && now.difference(_lastShake!).inMilliseconds < 1400)
+    if (_lastShake != null &&
+        now.difference(_lastShake!).inMilliseconds < 1400) {
       return;
+    }
     _lastShake = now;
 
     if (_showingPopup || !mounted) return;
@@ -2172,6 +1621,7 @@ class _PreviewScreenState extends State<PreviewScreen>
   }
 
   void _showSettings() {
+    HapticFeedback.mediumImpact();
     _showingPopup = true;
     showDialog<void>(
       context: context,
@@ -2191,7 +1641,10 @@ class _PreviewScreenState extends State<PreviewScreen>
             borderRadius: BorderRadius.circular(20),
           ),
           insetPadding: isTabletSettings
-              ? EdgeInsets.symmetric(horizontal: MediaQuery.of(ctx).size.width * 0.15, vertical: 40)
+              ? EdgeInsets.symmetric(
+                  horizontal: MediaQuery.of(ctx).size.width * 0.15,
+                  vertical: 40,
+                )
               : null,
           title: const Text(
             'Preview Settings',
@@ -2230,14 +1683,17 @@ class _PreviewScreenState extends State<PreviewScreen>
                       ),
                     ),
                     const SizedBox(height: 8),
-                    _settingToggle(
-                      'Issue Highlighting',
-                      'Show overflow/overlap warnings',
-                      localIssues,
-                      (v) {
-                        setInner(() => localIssues = v);
-                        setState(() => _showIssues = v);
-                      },
+                    PremiumGate(
+                      feature: PremiumFeature.issueHighlighting,
+                      child: _settingToggle(
+                        'Issue Highlighting',
+                        'Show overflow/overlap warnings',
+                        localIssues,
+                        (v) {
+                          setInner(() => localIssues = v);
+                          setState(() => _showIssues = v);
+                        },
+                      ),
                     ),
                     const SizedBox(height: 8),
                     _settingToggle(
@@ -2313,7 +1769,9 @@ class _PreviewScreenState extends State<PreviewScreen>
                       DisplayMode.fitToScreen,
                       localMode,
                       setInner,
-                      (m) => setInner(() { localMode = m; }),
+                      (m) => setInner(() {
+                        localMode = m;
+                      }),
                     ),
                     const SizedBox(height: 6),
                     _modeChip(
@@ -2322,7 +1780,9 @@ class _PreviewScreenState extends State<PreviewScreen>
                       DisplayMode.pixelPerfect,
                       localMode,
                       setInner,
-                      (m) => setInner(() { localMode = m; }),
+                      (m) => setInner(() {
+                        localMode = m;
+                      }),
                     ),
                     const SizedBox(height: 16),
                     const Text(
@@ -2479,8 +1939,9 @@ class _PreviewScreenState extends State<PreviewScreen>
                                 );
                                 if (widget.controller.customPresets.any(
                                   (x) => x.name == p.name,
-                                ))
+                                )) {
                                   return;
+                                }
                                 widget.controller.customPresets.insert(0, p);
                                 setState(() => _selectedPreset = p);
                               },
@@ -2522,6 +1983,7 @@ class _PreviewScreenState extends State<PreviewScreen>
                 ),
               ),
               onPressed: () {
+                HapticFeedback.lightImpact();
                 Navigator.of(context).pop();
                 Navigator.of(context).pop();
               },
@@ -2534,6 +1996,7 @@ class _PreviewScreenState extends State<PreviewScreen>
   }
 
   void _showHistory() {
+    HapticFeedback.selectionClick();
     final history = widget.controller.sessionHistory;
     _showingPopup = true;
     showModalBottomSheet<void>(
@@ -2620,6 +2083,205 @@ class _PreviewScreenState extends State<PreviewScreen>
                           ),
                         ),
                         contentPadding: EdgeInsets.zero,
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    ).then((_) => _showingPopup = false);
+  }
+
+  void _showNotes() {
+    HapticFeedback.selectionClick();
+    _showingPopup = true;
+    final notes = widget.controller.notes.value;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFFF9F9F9),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF626262),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Notes',
+                style: TextStyle(
+                  color: Color(0xFF1A1C1C),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${notes.length} note${notes.length != 1 ? 's' : ''}',
+                style: const TextStyle(color: Color(0xFF626262), fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              if (notes.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(
+                    child: Text(
+                      'No notes yet',
+                      style: TextStyle(color: Color(0xFF626262)),
+                    ),
+                  ),
+                )
+              else
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: notes.length,
+                    separatorBuilder: (_, _) =>
+                        const Divider(color: Color(0xFFEEEEEE), height: 1),
+                    itemBuilder: (_, i) {
+                      final n = notes[i];
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(
+                          Icons.note,
+                          color: Color(0xFF000000),
+                          size: 20,
+                        ),
+                        title: Text(
+                          n['text']?.toString() ?? '',
+                          style: const TextStyle(
+                            color: Color(0xFF1A1C1C),
+                            fontSize: 14,
+                          ),
+                        ),
+                        subtitle: Text(
+                          n['author']?.toString() ?? '',
+                          style: const TextStyle(
+                            color: Color(0xFF626262),
+                            fontSize: 11,
+                          ),
+                        ),
+                        contentPadding: EdgeInsets.zero,
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    ).then((_) => _showingPopup = false);
+  }
+
+  void _showGallery() {
+    HapticFeedback.selectionClick();
+    _showingPopup = true;
+    final frames = widget.controller.frameGallery.value;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFFF9F9F9),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF626262),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Frame Gallery',
+                style: TextStyle(
+                  color: Color(0xFF1A1C1C),
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${frames.length} frame${frames.length != 1 ? 's' : ''}',
+                style: const TextStyle(color: Color(0xFF626262), fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              if (frames.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(
+                    child: Text(
+                      'No frames available',
+                      style: TextStyle(color: Color(0xFF626262)),
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: GridView.builder(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                        ),
+                    itemCount: frames.length,
+                    itemBuilder: (_, i) {
+                      final f = frames[i];
+                      final thumb = f['preview']?.toString() ?? f['thumbnail']?.toString() ?? '';
+                      return GestureDetector(
+                        onTap: () {
+                          final id = f['id']?.toString();
+                          if (id != null) {
+                            widget.controller.requestFrameSelect(id);
+                          }
+                          Navigator.of(ctx).pop();
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEEEEEE),
+                            border: Border.all(color: const Color(0xFF000000)),
+                          ),
+                          child: thumb.isNotEmpty
+                              ? ClipRect(
+                                  child: Image.memory(
+                                    base64Decode(thumb.split(',').last),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const Icon(
+                                      Icons.image,
+                                      color: Color(0xFF626262),
+                                    ),
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.image,
+                                  color: Color(0xFF626262),
+                                ),
+                        ),
                       );
                     },
                   ),
@@ -2753,6 +2415,7 @@ class _PreviewScreenState extends State<PreviewScreen>
   }
 
   Future<void> _takeScreenshot() async {
+    HapticFeedback.mediumImpact();
     try {
       final boundary =
           _screenshotKey.currentContext?.findRenderObject()
@@ -2777,7 +2440,9 @@ class _PreviewScreenState extends State<PreviewScreen>
           ),
         );
       }
-    } catch (_) {}
+    } catch (e, st) {
+      logError(e, st);
+    }
   }
 
   Widget _modeChip(
@@ -2925,12 +2590,12 @@ class _PreviewScreenState extends State<PreviewScreen>
                 if (layer['x'] != null && layer['y'] != null)
                   _inspectorRow(
                     'Position',
-                    'x:${(layer['x'] as num).round()} y:${(layer['y'] as num).round()}',
+                    'x:${(layer['x'] as num?)?.round() ?? 0} y:${(layer['y'] as num?)?.round() ?? 0}',
                   ),
                 if (layer['width'] != null && layer['height'] != null)
                   _inspectorRow(
                     'Size',
-                    '${(layer['width'] as num).round()}\u00D7${(layer['height'] as num).round()}',
+                    '${(layer['width'] as num?)?.round() ?? 0}\u00D7${(layer['height'] as num?)?.round() ?? 0}',
                   ),
               ],
             ),
@@ -3111,8 +2776,9 @@ class _PreviewScreenState extends State<PreviewScreen>
 
   Widget _buildGridOverlay(FrameMetadata meta, double renderW, double renderH) {
     const cellSize = 8; // 8x8 px grid cells in design coordinates
-    if (meta.frameWidth <= 0 || meta.frameHeight <= 0)
+    if (meta.frameWidth <= 0 || meta.frameHeight <= 0) {
       return const SizedBox.shrink();
+    }
     final cols = (meta.frameWidth / cellSize).ceil();
     final rows = (meta.frameHeight / cellSize).ceil();
     final scaleX = renderW / meta.frameWidth;
@@ -3134,10 +2800,26 @@ class _PreviewScreenState extends State<PreviewScreen>
   Widget _buildDeviceFrame(FrameMetadata meta, double renderW, double renderH) {
     final isTablet = _selectedPreset.screenWidth >= 820;
     final isDesktop = _selectedPreset.screenWidth >= 1440;
-    final cornerRadius = isTablet ? 32.0 : isDesktop ? 8.0 : 24.0;
-    final notchWidth = isDesktop ? 0.0 : isTablet ? 0.0 : 80.0;
-    final notchHeight = isDesktop ? 0.0 : isTablet ? 0.0 : 6.0;
-    final notchTop = isDesktop ? 0.0 : isTablet ? 0.0 : 0.0;
+    final cornerRadius = isTablet
+        ? 32.0
+        : isDesktop
+        ? 8.0
+        : 24.0;
+    final notchWidth = isDesktop
+        ? 0.0
+        : isTablet
+        ? 0.0
+        : 80.0;
+    final notchHeight = isDesktop
+        ? 0.0
+        : isTablet
+        ? 0.0
+        : 6.0;
+    final notchTop = isDesktop
+        ? 0.0
+        : isTablet
+        ? 0.0
+        : 0.0;
     return IgnorePointer(
       child: Stack(
         children: [
@@ -3272,18 +2954,26 @@ class _PreviewScreenState extends State<PreviewScreen>
     );
   }
 
-  Widget _buildOverlayCompareSlider(double renderW, String previousImageData) {
+  Widget _buildOverlayCompareSlider(
+    double renderW,
+    double renderH,
+    String previousImageData,
+  ) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final totalW = constraints.maxWidth > 0 ? constraints.maxWidth : renderW;
+        final totalW = constraints.maxWidth > 0
+            ? constraints.maxWidth
+            : renderW;
         return GestureDetector(
           onHorizontalDragUpdate: (details) {
             setState(() {
-              _overlayCompareSliderPos = (details.localPosition.dx / totalW).clamp(0.05, 0.95);
+              _overlayCompareSliderPos = (details.localPosition.dx / totalW)
+                  .clamp(0.05, 0.95);
             });
           },
           child: SizedBox(
             width: totalW,
+            height: renderH,
             child: Stack(
               children: [
                 ClipRect(
@@ -3295,6 +2985,7 @@ class _PreviewScreenState extends State<PreviewScreen>
                       child: Image.memory(
                         base64Decode(previousImageData.split(',').last),
                         width: totalW,
+                        height: renderH,
                         fit: BoxFit.fitWidth,
                         filterQuality: FilterQuality.high,
                         gaplessPlayback: true,
@@ -3310,7 +3001,11 @@ class _PreviewScreenState extends State<PreviewScreen>
                   child: GestureDetector(
                     onHorizontalDragUpdate: (details) {
                       setState(() {
-                        _overlayCompareSliderPos = ((totalW * _overlayCompareSliderPos + details.delta.dx) / totalW).clamp(0.05, 0.95);
+                        _overlayCompareSliderPos =
+                            ((totalW * _overlayCompareSliderPos +
+                                        details.delta.dx) /
+                                    totalW)
+                                .clamp(0.05, 0.95);
                       });
                     },
                     child: Container(
@@ -3318,14 +3013,25 @@ class _PreviewScreenState extends State<PreviewScreen>
                         color: Colors.white.withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 8),
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            blurRadius: 8,
+                          ),
                         ],
                       ),
                       child: const Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.chevron_left, size: 14, color: Colors.black87),
-                          Icon(Icons.chevron_right, size: 14, color: Colors.black87),
+                          Icon(
+                            Icons.chevron_left,
+                            size: 14,
+                            color: Colors.black87,
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            size: 14,
+                            color: Colors.black87,
+                          ),
                         ],
                       ),
                     ),
@@ -3350,7 +3056,7 @@ class _PreviewScreenState extends State<PreviewScreen>
       SystemUiMode.manual,
       overlays: const [SystemUiOverlay.top, SystemUiOverlay.bottom],
     );
-    widget.controller.dispose();
+    widget.controller.disconnect();
     super.dispose();
   }
 
@@ -3391,14 +3097,15 @@ class _PreviewScreenState extends State<PreviewScreen>
                 );
               } else {
                 Uint8List? decodedImage;
-                try {
-                  decodedImage = base64Decode(imageData.split(',').last);
-                } catch (_) {
-                  content = const Center(
-                    child: Text(
-                      'Failed to decode image',
-                      style: TextStyle(color: AppPalette.dim),
-                    ),
+                  try {
+                    decodedImage = base64Decode(imageData.split(',').last);
+                  } catch (e, st) {
+                    logError(e, st);
+                    content = const Center(
+                      child: Text(
+                        'Failed to decode image',
+                        style: TextStyle(color: AppPalette.dim),
+                      ),
                   );
                   return const SizedBox.shrink();
                 }
@@ -3431,8 +3138,9 @@ class _PreviewScreenState extends State<PreviewScreen>
                         );
                         setState(() {
                           _measurePoints = [..._measurePoints, f];
-                          if (_measurePoints.length > 2)
+                          if (_measurePoints.length > 2) {
                             _measurePoints = _measurePoints.sublist(1);
+                          }
                         });
                         return;
                       }
@@ -3453,6 +3161,7 @@ class _PreviewScreenState extends State<PreviewScreen>
 
                       final hitLayer = _hitTestTextLayer(frameLocalPos, meta);
                       if (hitLayer != null) {
+                        HapticFeedback.selectionClick();
                         _showLayerInspector(hitLayer, localPos);
                       }
                     },
@@ -3461,81 +3170,88 @@ class _PreviewScreenState extends State<PreviewScreen>
                       minScale: 0.5,
                       maxScale: 8.0,
                       constrained: false,
-                      child: Container(
-                        color: const Color(0xFF0C0C0C),
-                        child: Stack(
-                          children: [
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.overlayMode,
-                                ) &&
-                                _overlayMode &&
-                                widget.controller.previousImageData != null)
-                              Opacity(
-                                opacity: _overlayOpacity,
-                                child: Image.memory(
-                                  base64Decode(
-                                    widget.controller.previousImageData!
-                                        .split(',')
-                                        .last,
+                      child: SizedBox(
+                        width: renderWidth,
+                        height: renderHeight,
+                        child: Container(
+                          color: const Color(0xFF0C0C0C),
+                          child: Stack(
+                            children: [
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.overlayMode,
+                                  ) &&
+                                  _overlayMode &&
+                                  widget.controller.previousImageData != null)
+                                Opacity(
+                                  opacity: _overlayOpacity,
+                                  child: Image.memory(
+                                    base64Decode(
+                                      widget.controller.previousImageData!
+                                          .split(',')
+                                          .last,
+                                    ),
+                                    width: renderWidth,
+                                    height: renderHeight,
+                                    fit: BoxFit.fill,
+                                    filterQuality: FilterQuality.high,
+                                    gaplessPlayback: true,
                                   ),
-                                  width: renderWidth,
-                                  height: renderHeight,
-                                  fit: BoxFit.fill,
-                                  filterQuality: FilterQuality.high,
-                                  gaplessPlayback: true,
                                 ),
+                              Image.memory(
+                                key: _imageKey,
+                                decodedImage,
+                                width: renderWidth,
+                                height: renderHeight,
+                                fit: BoxFit.fill,
+                                filterQuality: FilterQuality.high,
+                                gaplessPlayback: true,
                               ),
-                            Image.memory(
-                              key: _imageKey,
-                              decodedImage,
-                              width: renderWidth,
-                              height: renderHeight,
-                              fit: BoxFit.fill,
-                              filterQuality: FilterQuality.high,
-                              gaplessPlayback: true,
-                            ),
-                            if (_showIssues)
-                              _buildIssueOverlay(
-                                meta,
-                                renderWidth,
-                                renderHeight,
-                              ),
-                            if (_showSafeArea)
-                              _buildSafeAreaOverlay(
-                                meta,
-                                renderWidth,
-                                renderHeight,
-                              ),
-                            if (_showGrid)
-                              _buildGridOverlay(
-                                meta,
-                                renderWidth,
-                                renderHeight,
-                              ),
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.rulers,
-                                ) &&
-                                _showRulers)
-                              _buildRulers(meta, renderWidth, renderHeight),
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.measurement,
-                                ) &&
-                                _measureMode)
-                              _buildMeasurementOverlay(
-                                meta,
-                                renderWidth,
-                                renderHeight,
-                              ),
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.deviceFrame,
-                                ) &&
-                                _showDeviceFrame)
-                              _buildDeviceFrame(
-                                meta,
-                                renderWidth,
-                                renderHeight,
-                              ),
-                          ],
+                              if (_showIssues &&
+                                  PremiumManager.hasAccess(
+                                    PremiumFeature.issueHighlighting,
+                                  ))
+                                _buildIssueOverlay(
+                                  meta,
+                                  renderWidth,
+                                  renderHeight,
+                                ),
+                              if (_showSafeArea)
+                                _buildSafeAreaOverlay(
+                                  meta,
+                                  renderWidth,
+                                  renderHeight,
+                                ),
+                              if (_showGrid)
+                                _buildGridOverlay(
+                                  meta,
+                                  renderWidth,
+                                  renderHeight,
+                                ),
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.rulers,
+                                  ) &&
+                                  _showRulers)
+                                _buildRulers(meta, renderWidth, renderHeight),
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.measurement,
+                                  ) &&
+                                  _measureMode)
+                                _buildMeasurementOverlay(
+                                  meta,
+                                  renderWidth,
+                                  renderHeight,
+                                ),
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.deviceFrame,
+                                  ) &&
+                                  _showDeviceFrame)
+                                _buildDeviceFrame(
+                                  meta,
+                                  renderWidth,
+                                  renderHeight,
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -3565,8 +3281,9 @@ class _PreviewScreenState extends State<PreviewScreen>
                         );
                         setState(() {
                           _measurePoints = [..._measurePoints, f];
-                          if (_measurePoints.length > 2)
+                          if (_measurePoints.length > 2) {
                             _measurePoints = _measurePoints.sublist(1);
+                          }
                         });
                         return;
                       }
@@ -3589,6 +3306,7 @@ class _PreviewScreenState extends State<PreviewScreen>
 
                       final hitLayer = _hitTestTextLayer(frameLocalPos, meta);
                       if (hitLayer != null) {
+                        HapticFeedback.selectionClick();
                         _showLayerInspector(hitLayer, localPos);
                       }
                     },
@@ -3596,100 +3314,112 @@ class _PreviewScreenState extends State<PreviewScreen>
                       transformationController: _transformationController,
                       minScale: 1.0,
                       maxScale: 4.0,
+                      panEnabled: false,
                       child: SingleChildScrollView(
                         padding: EdgeInsets.zero,
                         physics: const ClampingScrollPhysics(),
-                        child: Stack(
-                          children: [
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.overlayMode,
-                                ) &&
-                                _overlayMode &&
-                                widget.controller.previousImageData != null &&
-                                _overlayCompare)
-                              _buildOverlayCompareSlider(
-                                screenWidth,
-                                widget.controller.previousImageData!,
-                              )
-                            else if (PremiumManager.hasAccess(
-                                  PremiumFeature.overlayMode,
-                                ) &&
-                                _overlayMode &&
-                                widget.controller.previousImageData != null)
-                              Opacity(
-                                opacity: _overlayOpacity,
-                                child: Image.memory(
-                                  base64Decode(
-                                    widget.controller.previousImageData!
-                                        .split(',')
-                                        .last,
+                        child: SizedBox(
+                          width: screenWidth,
+                          height:
+                              screenWidth *
+                              (meta.frameHeight / meta.frameWidth),
+                          child: Stack(
+                            children: [
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.overlayMode,
+                                  ) &&
+                                  _overlayMode &&
+                                  widget.controller.previousImageData != null &&
+                                  _overlayCompare)
+                                _buildOverlayCompareSlider(
+                                  screenWidth,
+                                  screenWidth *
+                                      (meta.frameHeight / meta.frameWidth),
+                                  widget.controller.previousImageData!,
+                                )
+                              else if (PremiumManager.hasAccess(
+                                    PremiumFeature.overlayMode,
+                                  ) &&
+                                  _overlayMode &&
+                                  widget.controller.previousImageData != null)
+                                Opacity(
+                                  opacity: _overlayOpacity,
+                                  child: Image.memory(
+                                    base64Decode(
+                                      widget.controller.previousImageData!
+                                          .split(',')
+                                          .last,
+                                    ),
+                                    width: screenWidth,
+                                    fit: BoxFit.fitWidth,
+                                    filterQuality: FilterQuality.high,
+                                    gaplessPlayback: true,
                                   ),
-                                  width: screenWidth,
-                                  fit: BoxFit.fitWidth,
-                                  filterQuality: FilterQuality.high,
-                                  gaplessPlayback: true,
                                 ),
+                              Image.memory(
+                                key: _imageKey,
+                                decodedImage,
+                                width: screenWidth,
+                                fit: BoxFit.fitWidth,
+                                filterQuality: FilterQuality.high,
+                                gaplessPlayback: true,
                               ),
-                            Image.memory(
-                              key: _imageKey,
-                              decodedImage,
-                              width: screenWidth,
-                              fit: BoxFit.fitWidth,
-                              filterQuality: FilterQuality.high,
-                              gaplessPlayback: true,
-                            ),
-                            if (_showIssues)
-                              _buildIssueOverlay(
-                                meta,
-                                screenWidth,
-                                screenWidth *
-                                    (meta.frameHeight / meta.frameWidth),
-                              ),
-                            if (_showSafeArea)
-                              _buildSafeAreaOverlay(
-                                meta,
-                                screenWidth,
-                                screenWidth *
-                                    (meta.frameHeight / meta.frameWidth),
-                              ),
-                            if (_showGrid)
-                              _buildGridOverlay(
-                                meta,
-                                screenWidth,
-                                screenWidth *
-                                    (meta.frameHeight / meta.frameWidth),
-                              ),
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.rulers,
-                                ) &&
-                                _showRulers)
-                              _buildRulers(
-                                meta,
-                                screenWidth,
-                                screenWidth *
-                                    (meta.frameHeight / meta.frameWidth),
-                              ),
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.measurement,
-                                ) &&
-                                _measureMode)
-                              _buildMeasurementOverlay(
-                                meta,
-                                screenWidth,
-                                screenWidth *
-                                    (meta.frameHeight / meta.frameWidth),
-                              ),
-                            if (PremiumManager.hasAccess(
-                                  PremiumFeature.deviceFrame,
-                                ) &&
-                                _showDeviceFrame)
-                              _buildDeviceFrame(
-                                meta,
-                                screenWidth,
-                                screenWidth *
-                                    (meta.frameHeight / meta.frameWidth),
-                              ),
-                          ],
+                              if (_showIssues &&
+                                  PremiumManager.hasAccess(
+                                    PremiumFeature.issueHighlighting,
+                                  ))
+                                _buildIssueOverlay(
+                                  meta,
+                                  screenWidth,
+                                  screenWidth *
+                                      (meta.frameHeight / meta.frameWidth),
+                                ),
+                              if (_showSafeArea)
+                                _buildSafeAreaOverlay(
+                                  meta,
+                                  screenWidth,
+                                  screenWidth *
+                                      (meta.frameHeight / meta.frameWidth),
+                                ),
+                              if (_showGrid)
+                                _buildGridOverlay(
+                                  meta,
+                                  screenWidth,
+                                  screenWidth *
+                                      (meta.frameHeight / meta.frameWidth),
+                                ),
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.rulers,
+                                  ) &&
+                                  _showRulers)
+                                _buildRulers(
+                                  meta,
+                                  screenWidth,
+                                  screenWidth *
+                                      (meta.frameHeight / meta.frameWidth),
+                                ),
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.measurement,
+                                  ) &&
+                                  _measureMode)
+                                _buildMeasurementOverlay(
+                                  meta,
+                                  screenWidth,
+                                  screenWidth *
+                                      (meta.frameHeight / meta.frameWidth),
+                                ),
+                              if (PremiumManager.hasAccess(
+                                    PremiumFeature.deviceFrame,
+                                  ) &&
+                                  _showDeviceFrame)
+                                _buildDeviceFrame(
+                                  meta,
+                                  screenWidth,
+                                  screenWidth *
+                                      (meta.frameHeight / meta.frameWidth),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -3725,21 +3455,213 @@ class _PreviewScreenState extends State<PreviewScreen>
                   ),
                   // Top-left badges: frame info + viewer count
                   if (imageData != null && meta != null)
-                    AnimatedOpacity(
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: AnimatedOpacity(
+                        opacity: _showToolbar ? 1.0 : 0.0,
+                        duration: const Duration(milliseconds: 250),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            GestureDetector(
+                              onTap: _toggleToolbar,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        '${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}',
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        _selectedPreset.name,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Colors.white38,
+                                          fontSize: 9,
+                                        ),
+                                      ),
+                                    ),
+                                    if (_isLandscape) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 5,
+                                          vertical: 1,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0x33FFA502),
+                                          borderRadius: BorderRadius.circular(
+                                            3,
+                                          ),
+                                          border: Border.all(
+                                            color: const Color(0x55FFA502),
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'LAND',
+                                          style: TextStyle(
+                                            color: Color(0xCCFFA502),
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (widget.controller.serverLabel == 'Cloud')
+                              ValueListenableBuilder<int>(
+                                valueListenable: widget.controller.viewerCount,
+                                builder: (_, count, _) {
+                                  if (count <= 0) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0x9922C55E),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.people_alt_rounded,
+                                            size: 12,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '$count',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  // Issue badge + suggestions (Pro feature)
+                  if (imageData != null &&
+                      meta != null &&
+                      PremiumManager.hasAccess(
+                        PremiumFeature.smartSuggestions,
+                      ))
+                    Positioned(
+                      top: 56,
+                      right: 12,
+                      child: ValueListenableBuilder<List<DesignIssue>>(
+                        valueListenable: widget.controller.issues,
+                        builder: (_, issues, _) {
+                          if (issues.isEmpty) return const SizedBox.shrink();
+                          return GestureDetector(
+                            onTap: () => _showSuggestions(issues),
+                            onLongPress: () =>
+                                setState(() => _showIssues = !_showIssues),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.75),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.warning_amber_rounded,
+                                    size: 14,
+                                    color:
+                                        issues.any((i) => i.type == 'overflow')
+                                        ? const Color(0xFFFF6B6B)
+                                        : const Color(0xFFFFC75F),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${issues.length} issues',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  // Connection quality indicator (top right)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: AnimatedOpacity(
                       opacity: _showToolbar ? 1.0 : 0.0,
                       duration: const Duration(milliseconds: 250),
-                      child: Positioned(
-                        top: 8,
-                        left: 8,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          GestureDetector(
+                      child: ValueListenableBuilder<ConnectionQuality>(
+                        valueListenable: widget.controller.connectionQuality,
+                        builder: (_, q, _) {
+                          final (color, label) = switch (q) {
+                            ConnectionQuality.good => (
+                              const Color(0xFF22C55E),
+                              'Good',
+                            ),
+                            ConnectionQuality.fair => (
+                              const Color(0xFFEAB308),
+                              'Fair',
+                            ),
+                            ConnectionQuality.poor => (
+                              const Color(0xFFEF4444),
+                              'Poor',
+                            ),
+                            ConnectionQuality.disconnected => (
+                              AppPalette.dim,
+                              'Disconnected',
+                            ),
+                          };
+                          return GestureDetector(
                             onTap: _toggleToolbar,
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
+                                horizontal: 6,
+                                vertical: 3,
                               ),
                               decoration: BoxDecoration(
                                 color: Colors.black.withValues(alpha: 0.6),
@@ -3748,251 +3670,38 @@ class _PreviewScreenState extends State<PreviewScreen>
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(
-                                    '${meta.frameWidth.toInt()}\u00D7${meta.frameHeight.toInt()}',
-                                    style: const TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 10,
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      shape: BoxShape.circle,
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
+                                  const SizedBox(width: 4),
                                   Text(
-                                    _selectedPreset.name,
+                                    label,
                                     style: const TextStyle(
-                                      color: Colors.white38,
+                                      color: Colors.white54,
                                       fontSize: 9,
                                     ),
                                   ),
-                                  if (_isLandscape) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 5,
-                                        vertical: 1,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0x33FFA502),
-                                        borderRadius: BorderRadius.circular(3),
-                                        border: Border.all(
-                                          color: const Color(0x55FFA502),
-                                        ),
-                                      ),
-                                      child: const Text(
-                                        'LAND',
-                                        style: TextStyle(
-                                          color: Color(0xCCFFA502),
-                                          fontSize: 8,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
                                 ],
                               ),
                             ),
-                          ),
-                          if (widget.controller.serverLabel == 'Cloud')
-                            ValueListenableBuilder<int>(
-                              valueListenable: widget.controller.viewerCount,
-                              builder: (_, count, _) {
-                                if (count <= 0) return const SizedBox.shrink();
-                                return Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0x9922C55E),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(
-                                          Icons.people_alt_rounded,
-                                          size: 12,
-                                          color: Colors.white,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          '$count',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  // Issue badge + suggestions
-                  if (imageData != null && meta != null)
-                    Positioned(
-                      bottom: 12,
-                      left: 12,
-                      child: ValueListenableBuilder<List<DesignIssue>>(
-                        valueListenable: widget.controller.issues,
-                        builder: (_, issues, _) {
-                          if (issues.isEmpty) return const SizedBox.shrink();
-                          return Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              GestureDetector(
-                                onTap: () =>
-                                    setState(() => _showIssues = !_showIssues),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 7,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        issues.any((i) => i.type == 'overflow')
-                                        ? const Color(0xCCFF4757)
-                                        : const Color(0xCCFFA502),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.warning_amber_rounded,
-                                        size: 14,
-                                        color: Colors.white,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        '${issues.length}',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: () => _showSuggestions(issues),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 7,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.7),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: Colors.white24),
-                                  ),
-                                  child: const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.auto_awesome,
-                                        size: 14,
-                                        color: Color(0xAA22C55E),
-                                      ),
-                                      SizedBox(width: 6),
-                                      Text(
-                                        'Suggest',
-                                        style: TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
                           );
                         },
                       ),
                     ),
-                  // Connection quality indicator (top right)
-                  AnimatedOpacity(
-                    opacity: _showToolbar ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 250),
-                    child: Positioned(
-                      top: 8,
-                      right: 8,
-                    child: ValueListenableBuilder<ConnectionQuality>(
-                      valueListenable: widget.controller.connectionQuality,
-                      builder: (_, q, _) {
-                        final (color, label) = switch (q) {
-                          ConnectionQuality.good => (
-                            const Color(0xFF22C55E),
-                            'Good',
-                          ),
-                          ConnectionQuality.fair => (
-                            const Color(0xFFEAB308),
-                            'Fair',
-                          ),
-                          ConnectionQuality.poor => (
-                            const Color(0xFFEF4444),
-                            'Poor',
-                          ),
-                          ConnectionQuality.disconnected => (
-                            AppPalette.dim,
-                            'Disconnected',
-                          ),
-                        };
-                        return GestureDetector(
-                          onTap: _toggleToolbar,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.6),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: color,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  label,
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 9,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
                   ),
                   // Reconnecting overlay
                   ValueListenableBuilder<ConnectionQuality>(
                     valueListenable: widget.controller.connectionQuality,
                     builder: (_, q, _) {
                       if (q == ConnectionQuality.good ||
-                          q == ConnectionQuality.fair)
+                          q == ConnectionQuality.fair) {
                         return const SizedBox.shrink();
+                      }
                       return Positioned(
                         top: 0,
                         left: 0,
@@ -4069,275 +3778,319 @@ class _PreviewScreenState extends State<PreviewScreen>
                                   width: 0.5,
                                 ),
                               ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // Quality dot
-                                  ValueListenableBuilder<ConnectionQuality>(
-                                    valueListenable:
-                                        widget.controller.connectionQuality,
-                                    builder: (_, q, _) {
-                                      final c = q == ConnectionQuality.good
-                                          ? const Color(0xFF22C55E)
-                                          : q == ConnectionQuality.fair
-                                          ? const Color(0xFFEAB308)
-                                          : q == ConnectionQuality.poor
-                                          ? const Color(0xFFEF4444)
-                                          : AppPalette.dim;
-                                      return Container(
-                                        width: 8,
-                                        height: 8,
-                                        margin: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: c,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  if (widget.controller.serverLabel == 'Cloud')
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // Quality dot
+                                    ValueListenableBuilder<ConnectionQuality>(
+                                      valueListenable:
+                                          widget.controller.connectionQuality,
+                                      builder: (_, q, _) {
+                                        final c = q == ConnectionQuality.good
+                                            ? const Color(0xFF22C55E)
+                                            : q == ConnectionQuality.fair
+                                            ? const Color(0xFFEAB308)
+                                            : q == ConnectionQuality.poor
+                                            ? const Color(0xFFEF4444)
+                                            : AppPalette.dim;
+                                        return Container(
+                                          width: 8,
+                                          height: 8,
+                                          margin: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: c,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    if (widget.controller.serverLabel ==
+                                        'Cloud')
+                                      ValueListenableBuilder<int>(
+                                        valueListenable:
+                                            widget.controller.viewerCount,
+                                        builder: (_, count, _) {
+                                          final label = count > 1
+                                              ? '$count viewers'
+                                              : count == 1
+                                              ? '1 viewer'
+                                              : '';
+                                          if (label.isEmpty) {
+                                            return const SizedBox.shrink();
+                                          }
+                                          return Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                            ),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 4,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0x3322C55E),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                border: Border.all(
+                                                  color: const Color(
+                                                    0x5522C55E,
+                                                  ),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                label,
+                                                style: const TextStyle(
+                                                  color: Color(0xCC22C55E),
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    _toolBtn(
+                                      Icons.close,
+                                      () => Navigator.of(context).pop(),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    _toolBtn(Icons.refresh, () {
+                                      widget.controller.requestManualSync();
+                                      _startToolbarTimer();
+                                    }),
+                                    const SizedBox(width: 8),
+                                    _toolBtn(
+                                      _displayMode == DisplayMode.pixelPerfect
+                                          ? Icons.fit_screen
+                                          : Icons.one_x_mobiledata,
+                                      () {
+                                        setState(
+                                          () => _displayMode =
+                                              _displayMode ==
+                                                  DisplayMode.fitToScreen
+                                              ? DisplayMode.pixelPerfect
+                                              : DisplayMode.fitToScreen,
+                                        );
+                                        _transformationController.value =
+                                            Matrix4.identity();
+                                        _startToolbarTimer();
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    if (PremiumManager.hasAccess(
+                                      PremiumFeature.landscapeMode,
+                                    ))
+                                      _toolBtn(
+                                        _isLandscape
+                                            ? Icons.screen_rotation
+                                            : Icons.rotate_left,
+                                        () {
+                                          setState(
+                                            () => _isLandscape = !_isLandscape,
+                                          );
+                                          _startToolbarTimer();
+                                        },
+                                      )
+                                    else
+                                      _toolBtn(
+                                        Icons.lock_outline,
+                                        () => ProLocked(
+                                          feature: PremiumFeature.landscapeMode,
+                                          child: const SizedBox(),
+                                        ).showUpgrade(context),
+                                      ),
+                                    const SizedBox(width: 8),
+                                    _toolBtn(Icons.note_rounded, () {
+                                      _showNotes();
+                                      _startToolbarTimer();
+                                    }),
+                                    const SizedBox(width: 8),
+                                    _toolBtn(Icons.photo_library_rounded, () {
+                                      _showGallery();
+                                      _startToolbarTimer();
+                                    }),
+                                    const SizedBox(width: 8),
+                                    if (PremiumManager.hasAccess(
+                                      PremiumFeature.measurement,
+                                    ))
+                                      _toolBtn(
+                                        _measureMode
+                                            ? Icons.horizontal_rule
+                                            : Icons.straighten,
+                                        () {
+                                          setState(() {
+                                            _measureMode = !_measureMode;
+                                            _measurePoints.clear();
+                                          });
+                                          _startToolbarTimer();
+                                        },
+                                      )
+                                    else
+                                      _toolBtn(
+                                        Icons.lock_outline,
+                                        () => ProLocked(
+                                          feature: PremiumFeature.measurement,
+                                          child: const SizedBox(),
+                                        ).showUpgrade(context),
+                                      ),
+                                    const SizedBox(width: 8),
+                                    if (PremiumManager.hasAccess(
+                                      PremiumFeature.overlayMode,
+                                    ))
+                                      _toolBtn(
+                                        _overlayMode
+                                            ? Icons.layers_clear
+                                            : Icons.layers,
+                                        () {
+                                          setState(
+                                            () => _overlayMode = !_overlayMode,
+                                          );
+                                          _startToolbarTimer();
+                                        },
+                                      )
+                                    else
+                                      _toolBtn(
+                                        Icons.lock_outline,
+                                        () => ProLocked(
+                                          feature: PremiumFeature.overlayMode,
+                                          child: const SizedBox(),
+                                        ).showUpgrade(context),
+                                      ),
+                                    const SizedBox(width: 8),
+                                    if (PremiumManager.hasAccess(
+                                      PremiumFeature.screenshotExport,
+                                    ))
+                                      _toolBtn(Icons.download_rounded, () {
+                                        _takeScreenshot();
+                                        _startToolbarTimer();
+                                      })
+                                    else
+                                      _toolBtn(
+                                        Icons.lock_outline,
+                                        () => ProLocked(
+                                          feature:
+                                              PremiumFeature.screenshotExport,
+                                          child: const SizedBox(),
+                                        ).showUpgrade(context),
+                                      ),
+                                    const SizedBox(width: 8),
                                     ValueListenableBuilder<int>(
                                       valueListenable:
                                           widget.controller.viewerCount,
-                                      builder: (_, count, _) {
-                                        final label = count > 1
-                                            ? '$count viewers'
-                                            : count == 1
-                                            ? '1 viewer'
-                                            : '';
-                                        if (label.isEmpty)
-                                          return const SizedBox.shrink();
-                                        return Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                          ),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: const Color(0x3322C55E),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              border: Border.all(
-                                                color: const Color(0x5522C55E),
-                                              ),
-                                            ),
-                                            child: Text(
-                                              label,
-                                              style: const TextStyle(
-                                                color: Color(0xCC22C55E),
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  _toolBtn(
-                                    Icons.close,
-                                    () => Navigator.of(context).pop(),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  _toolBtn(Icons.refresh, () {
-                                    widget.controller.requestManualSync();
-                                    _startToolbarTimer();
-                                  }),
-                                  const SizedBox(width: 8),
-                                  _toolBtn(
-                                    _displayMode == DisplayMode.pixelPerfect
-                                        ? Icons.fit_screen
-                                        : Icons.one_x_mobiledata,
-                                    () {
-                                      setState(
-                                        () => _displayMode =
-                                            _displayMode ==
-                                                DisplayMode.fitToScreen
-                                            ? DisplayMode.pixelPerfect
-                                            : DisplayMode.fitToScreen,
-                                      );
-                                      _transformationController.value =
-                                          Matrix4.identity();
-                                      _startToolbarTimer();
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(
-                                    PremiumFeature.landscapeMode,
-                                  ))
-                                    _toolBtn(
-                                      _isLandscape
-                                          ? Icons.screen_rotation
-                                          : Icons.rotate_left,
-                                      () {
-                                        setState(
-                                          () => _isLandscape = !_isLandscape,
-                                        );
-                                        _startToolbarTimer();
-                                      },
-                                    )
-                                  else
-                                    _toolBtn(
-                                      Icons.lock_outline,
-                                      () => ProLocked(
-                                        feature: PremiumFeature.landscapeMode,
-                                        child: const SizedBox(),
-                                      ).showUpgrade(context),
-                                    ),
-                                  const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(
-                                    PremiumFeature.measurement,
-                                  ))
-                                    _toolBtn(
-                                      _measureMode
-                                          ? Icons.horizontal_rule
-                                          : Icons.straighten,
-                                      () {
-                                        setState(() {
-                                          _measureMode = !_measureMode;
-                                          _measurePoints.clear();
-                                        });
-                                        _startToolbarTimer();
-                                      },
-                                    )
-                                  else
-                                    _toolBtn(
-                                      Icons.lock_outline,
-                                      () => ProLocked(
-                                        feature: PremiumFeature.measurement,
-                                        child: const SizedBox(),
-                                      ).showUpgrade(context),
-                                    ),
-                                  const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(
-                                    PremiumFeature.overlayMode,
-                                  ))
-                                    _toolBtn(
-                                      _overlayMode
-                                          ? Icons.layers_clear
-                                          : Icons.layers,
-                                      () {
-                                        setState(
-                                          () => _overlayMode = !_overlayMode,
-                                        );
-                                        _startToolbarTimer();
-                                      },
-                                    )
-                                  else
-                                    _toolBtn(
-                                      Icons.lock_outline,
-                                      () => ProLocked(
-                                        feature: PremiumFeature.overlayMode,
-                                        child: const SizedBox(),
-                                      ).showUpgrade(context),
-                                    ),
-                                  const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(
-                                    PremiumFeature.screenshotExport,
-                                  ))
-                                    _toolBtn(Icons.download_rounded, () {
-                                      _takeScreenshot();
-                                      _startToolbarTimer();
-                                    })
-                                  else
-                                    _toolBtn(
-                                      Icons.lock_outline,
-                                      () => ProLocked(
-                                        feature:
-                                            PremiumFeature.screenshotExport,
-                                        child: const SizedBox(),
-                                      ).showUpgrade(context),
-                                    ),
-                                  const SizedBox(width: 8),
-                                  ValueListenableBuilder<int>(
-                                    valueListenable: widget.controller.viewerCount,
-                                    builder: (_, count, w) {
-                                      return PremiumGate(
-                                        feature: PremiumFeature.multiDevice,
-                                        child: GestureDetector(
-                                          onTap: () {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) => DeviceManagerScreen(
-                                                  isPro: PremiumManager.plan != Plan.free,
-                                                  currentViewers: count,
-                                                  maxViewers: PremiumManager.plan == Plan.team
-                                                      ? 999
-                                                      : PremiumManager.plan == Plan.pro
-                                                          ? 5
-                                                          : 1,
-                                                ),
-                                              ),
-                                            );
-                                            _startToolbarTimer();
-                                          },
-                                          child: Container(
-                                            width: _toolBtnSize,
-                                            height: _toolBtnSize,
-                                            decoration: const BoxDecoration(
-                                              color: AppPalette.card,
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: Stack(
-                                              clipBehavior: Clip.none,
-                                              children: [
-                                                Center(
-                                                  child: Icon(Icons.devices, color: Colors.white, size: _toolIconSize),
-                                                ),
-                                                if (count > 0)
-                                                  Positioned(
-                                                    right: -2,
-                                                    top: -2,
-                                                    child: Container(
-                                                      padding: const EdgeInsets.all(4),
-                                                      decoration: const BoxDecoration(
-                                                        color: Color(0xFF22C55E),
-                                                        shape: BoxShape.circle,
+                                      builder: (_, count, w) {
+                                        return PremiumGate(
+                                          feature: PremiumFeature.multiDevice,
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      DeviceManagerScreen(
+                                                        isPro:
+                                                            PremiumManager
+                                                                .plan !=
+                                                            Plan.free,
+                                                        currentViewers: count,
+                                                        maxViewers:
+                                                            PremiumManager
+                                                                    .plan ==
+                                                                Plan.team
+                                                            ? 999
+                                                            : PremiumManager
+                                                                      .plan ==
+                                                                  Plan.pro
+                                                            ? 5
+                                                            : 1,
                                                       ),
-                                                      child: Text(
-                                                        '$count',
-                                                        style: const TextStyle(
-                                                          color: Colors.black,
-                                                          fontSize: 9,
-                                                          fontWeight: FontWeight.w700,
+                                                ),
+                                              );
+                                              _startToolbarTimer();
+                                            },
+                                            child: Container(
+                                              width: _toolBtnSize,
+                                              height: _toolBtnSize,
+                                              decoration: const BoxDecoration(
+                                                color: AppPalette.card,
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: Stack(
+                                                clipBehavior: Clip.none,
+                                                children: [
+                                                  Center(
+                                                    child: Icon(
+                                                      Icons.devices,
+                                                      color: Colors.white,
+                                                      size: _toolIconSize,
+                                                    ),
+                                                  ),
+                                                  if (count > 0)
+                                                    Positioned(
+                                                      right: -2,
+                                                      top: -2,
+                                                      child: Container(
+                                                        padding:
+                                                            const EdgeInsets.all(
+                                                              4,
+                                                            ),
+                                                        decoration:
+                                                            const BoxDecoration(
+                                                              color: Color(
+                                                                0xFF22C55E,
+                                                              ),
+                                                              shape: BoxShape
+                                                                  .circle,
+                                                            ),
+                                                        child: Text(
+                                                          '$count',
+                                                          style:
+                                                              const TextStyle(
+                                                                color: Colors
+                                                                    .black,
+                                                                fontSize: 9,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                              ),
                                                         ),
                                                       ),
                                                     ),
-                                                  ),
-                                              ],
+                                                ],
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(width: 8),
-                                  if (PremiumManager.hasAccess(
-                                    PremiumFeature.sessionHistory,
-                                  ))
-                                    _toolBtn(Icons.history, () {
-                                      _showHistory();
-                                      _startToolbarTimer();
-                                    })
-                                  else
-                                    _toolBtn(
-                                      Icons.lock_outline,
-                                      () => ProLocked(
-                                        feature: PremiumFeature.sessionHistory,
-                                        child: const SizedBox(),
-                                      ).showUpgrade(context),
+                                        );
+                                      },
                                     ),
-                                  const SizedBox(width: 8),
-                                  _toolBtn(Icons.settings, () {
-                                    _showSettings();
-                                    _startToolbarTimer();
-                                  }),
-                                ],
+                                    const SizedBox(width: 8),
+                                    if (PremiumManager.hasAccess(
+                                      PremiumFeature.sessionHistory,
+                                    ))
+                                      _toolBtn(Icons.history, () {
+                                        _showHistory();
+                                        _startToolbarTimer();
+                                      })
+                                    else
+                                      _toolBtn(
+                                        Icons.lock_outline,
+                                        () => ProLocked(
+                                          feature:
+                                              PremiumFeature.sessionHistory,
+                                          child: const SizedBox(),
+                                        ).showUpgrade(context),
+                                      ),
+                                    const SizedBox(width: 8),
+                                    _toolBtn(Icons.settings, () {
+                                      _showSettings();
+                                      _startToolbarTimer();
+                                    }),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -4354,7 +4107,8 @@ class _PreviewScreenState extends State<PreviewScreen>
     );
   }
 
-  bool _isTabletSized(BuildContext c) => MediaQuery.of(c).size.shortestSide >= 600;
+  bool _isTabletSized(BuildContext c) =>
+      MediaQuery.of(c).size.shortestSide >= 600;
 
   double get _toolBtnSize => _isTabletSized(context) ? 52 : 44;
   double get _toolIconSize => _isTabletSized(context) ? 24 : 20;
@@ -4523,21 +4277,3 @@ class _MeasurePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _MeasurePainter old) => old.points != points;
 }
-
-Widget _card({required Widget child}) {
-  return Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: AppPalette.card,
-      border: Border.all(color: AppPalette.border),
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: child,
-  );
-}
-
-const _h = TextStyle(
-  color: AppPalette.text,
-  fontSize: 18,
-  fontWeight: FontWeight.w700,
-);

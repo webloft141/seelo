@@ -1,10 +1,43 @@
 figma.showUI(__html__, { width: 340, height: 520 });
 
 let debounceTimer = null;
+let autoSendEnabled = true;
+let lastContentHash = null;
+let sessionHistory = [];
+let notes = {};
 
 (async () => {
-    // Required before registering documentchange with dynamic-page
-    await figma.loadAllPagesAsync().catch(() => {});
+    try {
+        await figma.loadAllPagesAsync().catch(() => {});
+        const savedAutoSend = await figma.clientStorage.getAsync('seelo_auto_send');
+        if (savedAutoSend !== undefined) {
+            autoSendEnabled = savedAutoSend;
+        }
+        figma.ui.postMessage({ type: 'auto-send-state', data: autoSendEnabled });
+
+        try {
+            const savedState = await figma.clientStorage.getAsync('seelo_plugin_state');
+            if (savedState) {
+                figma.ui.postMessage({ type: 'restore-state', data: savedState });
+            }
+        } catch (_) {}
+
+        try {
+            const savedHistory = await figma.clientStorage.getAsync('seelo_session_history');
+            if (Array.isArray(savedHistory)) {
+                sessionHistory = savedHistory;
+                figma.ui.postMessage({ type: 'session-history', data: sessionHistory });
+            }
+        } catch (_) {}
+
+        try {
+            const savedNotes = await figma.clientStorage.getAsync('seelo_notes');
+            if (savedNotes) {
+                notes = savedNotes;
+            }
+        } catch (_) {}
+    } catch (_) {}
+
     figma.on("documentchange", (event) => {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => syncSelection(), 700);
@@ -14,6 +47,8 @@ let debounceTimer = null;
 figma.on("selectionchange", syncSelection);
 
 async function syncSelection() {
+    if (!autoSendEnabled) return;
+
     let selection = figma.currentPage.selection;
     if (selection.length === 0) {
         const firstFrame = figma.currentPage.children.find(
@@ -29,43 +64,67 @@ async function syncSelection() {
 
     try {
         let currentNode = selection[0];
-        
-        // Always export the entire frame even if an inner button is selected
+
         let rootNode = currentNode;
         while (rootNode && rootNode.parent && rootNode.parent.type !== 'PAGE') {
             rootNode = rootNode.parent;
         }
 
-        // Export as PNG 2x for sharp quality
-        const bytes = await rootNode.exportAsync({
-            format: 'PNG',
-            constraint: { type: 'SCALE', value: 2 },
-            contentsOnly: false
-        });
-
-        const base64 = figma.base64Encode(bytes);
-        
-        let videoLayers = [];
-        let textLayers = [];
-        if ('children' in rootNode) {
-            videoLayers = extractVideoLayers(rootNode, rootNode);
-            textLayers = extractTextLayers(rootNode, rootNode);
+        const textLayers = 'children' in rootNode ? extractTextLayers(rootNode, rootNode) : [];
+        const hashSource = rootNode.id + JSON.stringify(textLayers) + rootNode.width + 'x' + rootNode.height;
+        const contentHash = computeContentHash(hashSource);
+        const isDiffUpdate = lastContentHash === contentHash;
+        if (!isDiffUpdate) {
+            lastContentHash = contentHash;
         }
 
-        figma.ui.postMessage({ 
-            type: 'selection-updated', 
+        let videoLayers = [];
+        let backgroundColor = '#ffffff';
+        let imageData = null;
+
+        if (!isDiffUpdate) {
+            const bytes = await rootNode.exportAsync({
+                format: 'PNG',
+                constraint: { type: 'SCALE', value: 2 },
+                contentsOnly: false
+            });
+            const base64 = figma.base64Encode(bytes);
+            imageData = `data:image/png;base64,${base64}`;
+            if ('children' in rootNode) {
+                videoLayers = extractVideoLayers(rootNode, rootNode);
+            }
+            backgroundColor = extractSolidColor(rootNode);
+        } else {
+            if ('children' in rootNode) {
+                videoLayers = extractVideoLayers(rootNode, rootNode);
+            }
+        }
+
+        const componentVariants = collectComponentVariants(rootNode);
+        const frameGallery = await collectFrameGallery().catch(() => []);
+
+        figma.ui.postMessage({
+            type: 'selection-updated',
             data: {
                 id: rootNode.id,
                 projectId: figma.fileKey || 'local-file',
                 width: rootNode.width,
                 height: rootNode.height,
                 exportScale: 2,
-                imageData: `data:image/png;base64,${base64}`,
+                imageData: imageData,
                 videoLayers: videoLayers,
                 textLayers: textLayers,
-                backgroundColor: extractSolidColor(rootNode)
-            } 
+                backgroundColor: backgroundColor,
+                frameName: rootNode.name,
+                pageName: figma.currentPage.name,
+                frameGallery: frameGallery,
+                componentVariants: componentVariants,
+                contentHash: contentHash,
+                isDiffUpdate: isDiffUpdate
+            }
         });
+
+        saveRecentSession({ name: rootNode.name, timestamp: Date.now() });
     } catch (err) {
         console.error(err);
         figma.notify('Sync failed. Re-select frame and tap SYNC NOW.');
@@ -89,7 +148,7 @@ function extractVideoLayers(node, rootNode) {
             videos.push({ id: node.id, url, x, y, width: node.width, height: node.height });
         }
     }
-    
+
     if ('children' in node) {
         for (const child of node.children) {
             videos = videos.concat(extractVideoLayers(child, rootNode));
@@ -145,6 +204,81 @@ function extractSolidColor(node) {
     } catch (e) { return '#ffffff'; }
 }
 
+const _thumbCache = new Map();
+
+async function collectFrameGallery() {
+    try {
+        const frames = figma.currentPage.children.filter(
+            n => n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE'
+        );
+        frames.sort((a, b) => a.x - b.x);
+        const results = [];
+        for (const f of frames) {
+            const entry = { id: f.id, name: f.name, width: f.width, height: f.height };
+            const cached = _thumbCache.get(f.id);
+            if (cached && cached.w === f.width && cached.h === f.height) {
+                entry.preview = cached.preview;
+            } else {
+                try {
+                    const bytes = await f.exportAsync({
+                        format: 'PNG',
+                        constraint: { type: 'SCALE', value: 0.05 },
+                    });
+                    const b64 = figma.base64Encode(bytes);
+                    entry.preview = 'data:image/png;base64,' + b64;
+                    _thumbCache.set(f.id, { preview: entry.preview, w: f.width, h: f.height });
+                } catch (_) {}
+            }
+            results.push(entry);
+        }
+        return results;
+    } catch (_) { return []; }
+}
+
+function collectComponentVariants(node) {
+    try {
+        if (node.type === 'COMPONENT' || node.type === 'INSTANCE' || node.type === 'COMPONENT_SET') {
+            if (node.componentPropertyDefinitions) {
+                const out = [];
+                const defs = node.componentPropertyDefinitions;
+                for (const key in defs) {
+                    if (!Object.prototype.hasOwnProperty.call(defs, key)) continue;
+                    const val = defs[key];
+                    out.push({
+                        name: key,
+                        type: val.type,
+                        defaultValue: val.defaultValue
+                    });
+                }
+                return out;
+            }
+        }
+        return [];
+    } catch (_) { return []; }
+}
+
+function computeContentHash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const ch = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + ch;
+        hash = hash & hash;
+    }
+    return hash;
+}
+
+function saveRecentSession(info) {
+    try {
+        sessionHistory = sessionHistory.filter(s => s.name !== info.name);
+        sessionHistory.unshift(info);
+        if (sessionHistory.length > 10) {
+            sessionHistory = sessionHistory.slice(0, 10);
+        }
+        figma.clientStorage.setAsync('seelo_session_history', sessionHistory);
+        figma.ui.postMessage({ type: 'session-history', data: sessionHistory });
+    } catch (_) {}
+}
+
 figma.ui.onmessage = async (msg) => {
     const selection = figma.currentPage.selection;
     if (msg.type === 'resize') figma.ui.resize(msg.width, msg.height);
@@ -187,9 +321,9 @@ figma.ui.onmessage = async (msg) => {
     if (msg.type === 'navigate-frame') {
         const frames = figma.currentPage.children.filter(n => n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE');
         if (frames.length === 0) return;
-        
+
         frames.sort((a, b) => a.x - b.x);
-        
+
         let currentIndex = -1;
         if (selection.length > 0) {
             let currentNode = selection[0];
@@ -200,13 +334,13 @@ figma.ui.onmessage = async (msg) => {
                 currentIndex = frames.findIndex(f => f.id === currentNode.id);
             }
         }
-        
+
         let newIndex = 0;
         if (currentIndex !== -1) {
             if (msg.direction === 'next') newIndex = (currentIndex + 1) % frames.length;
             else if (msg.direction === 'prev') newIndex = (currentIndex - 1 + frames.length) % frames.length;
         }
-        
+
         const nextFrame = frames[newIndex];
         figma.currentPage.selection = [nextFrame];
         figma.viewport.scrollAndZoomIntoView([nextFrame]);
@@ -223,6 +357,50 @@ figma.ui.onmessage = async (msg) => {
                 figma.viewport.scrollAndZoomIntoView([node]);
             }
         }
+    }
+    if (msg.type === 'set-auto-send') {
+        autoSendEnabled = msg.value;
+        try {
+            await figma.clientStorage.setAsync('seelo_auto_send', msg.value);
+        } catch (_) {}
+        figma.ui.postMessage({ type: 'auto-send-state', data: autoSendEnabled });
+    }
+    if (msg.type === 'request-frame-list') {
+        const gallery = await collectFrameGallery().catch(() => []);
+        figma.ui.postMessage({ type: 'frame-list', data: gallery });
+    }
+    if (msg.type === 'select-frame-by-id') {
+        try {
+            const node = figma.getNodeById(msg.frameId);
+            if (node && node.type !== 'DOCUMENT' && node.type !== 'PAGE') {
+                figma.currentPage.selection = [node];
+                figma.viewport.scrollAndZoomIntoView([node]);
+            }
+        } catch (_) {}
+    }
+    if (msg.type === 'save-state') {
+        try {
+            await figma.clientStorage.setAsync('seelo_plugin_state', msg.data);
+        } catch (_) {}
+    }
+    if (msg.type === 'add-note') {
+        try {
+            notes[msg.nodeId] = msg.note;
+            await figma.clientStorage.setAsync('seelo_notes', notes);
+            figma.ui.postMessage({ type: 'notes-updated', data: Object.assign({}, notes) });
+        } catch (_) {}
+    }
+    if (msg.type === 'delete-note') {
+        try {
+            for (const key of Object.keys(notes)) {
+                if (notes[key].id === msg.noteId) {
+                    delete notes[key];
+                    break;
+                }
+            }
+            await figma.clientStorage.setAsync('seelo_notes', notes);
+            figma.ui.postMessage({ type: 'notes-updated', data: Object.assign({}, notes) });
+        } catch (_) {}
     }
 };
 
