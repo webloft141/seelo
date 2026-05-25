@@ -152,45 +152,7 @@ app.get('/api/auth/session', (req, res) => {
   });
 });
 
-// Device Code API proxy (CORS-safe for plugin data: URI)
-app.post('/api/auth/device-code', async (req, res) => {
-  const { client_id } = req.body;
-  if (!client_id) return res.status(400).json({ error: 'Missing client_id' });
-  try {
-    const r = await fetch('https://oauth2.googleapis.com/device/code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id, scope: 'openid email profile' }),
-    });
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: 'Google API unreachable' });
-  }
-});
-
-// Poll Google token via relay proxy
-app.post('/api/auth/device-token', async (req, res) => {
-  const { client_id, device_code } = req.body;
-  if (!client_id || !device_code) return res.status(400).json({ error: 'Missing client_id or device_code' });
-  try {
-    const r = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_id,
-        device_code,
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-      }),
-    });
-    const data = await r.json();
-    res.json(data);
-  } catch (e) {
-    res.status(502).json({ error: 'Google API unreachable' });
-  }
-});
-
-// Google ID token → Firebase custom token (fallback for plugin signInWithCredential)
+// Google ID token → Firebase custom token (for plugin signInWithCredential fallback)
 app.post('/api/auth/google-token', async (req, res) => {
   const { idToken } = req.body;
   if (!idToken) return res.status(400).json({ error: 'Missing idToken' });

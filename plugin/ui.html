@@ -14,6 +14,7 @@
             --radius: 8px;
             --radius-sm: 6px;
         }
+        @keyframes spin { to { transform: rotate(360deg); } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -309,24 +310,19 @@
                         <span style="font-size:16px;">G</span>
                         <span>Sign in with Google</span>
                     </button>
-                    <div style="font-size:9px;color:var(--text-dim);margin-top:4px;">Enter code on google.com/device — no tab needed</div>
+                    <div style="font-size:9px;color:var(--text-dim);margin-top:4px;">Opens a browser tab to sign in</div>
                 </div>
                 <div id="auth-toggle" style="text-align:center;margin-top:8px;font-size:11px;color:var(--text-sec);">
                     No account? <a href="#" onclick="showAuth('register');return false">Sign up</a>
                 </div>
             </form>
-            <!-- Device Code (Google Sign-In without popup/tab) -->
-            <div id="device-code-section" class="hidden" style="display:none;text-align:center;padding:4px 0;">
-                <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Sign in with Google</div>
-                <div style="font-size:11px;color:var(--text-sec);margin-bottom:4px;">
-                    1. Visit <strong style="color:var(--text);">google.com/device</strong>
-                </div>
-                <div style="font-size:11px;color:var(--text-sec);margin-bottom:8px;">
-                    2. Enter this code:
-                </div>
-                <div id="device-user-code" style="font-size:28px;font-weight:800;letter-spacing:4px;padding:10px 14px;background:var(--bg);border-radius:8px;margin:6px 0;font-family:monospace;color:var(--text);"></div>
-                <div id="device-status" style="font-size:11px;color:var(--text-dim);margin:8px 0 4px;"></div>
-                <button type="button" class="btn-s" onclick="cancelDeviceCode()" style="margin-top:8px;padding:5px 14px;font-size:11px;">Back</button>
+            <!-- Google Sign-In inline status (tab flow) -->
+            <div id="google-auth-status" class="hidden" style="display:none;text-align:center;padding:8px 0;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:8px;">Sign in with Google</div>
+                <div id="google-auth-msg" style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">Opening Google sign-in...</div>
+                <div style="margin:8px 0;"><span class="spinner" style="display:inline-block;width:22px;height:22px;border:2px solid var(--border);border-top-color:#6366f1;border-radius:50%;animation:spin 0.8s linear infinite;"></span></div>
+                <div id="google-auth-url-text" style="font-size:9px;color:var(--text-dim);word-break:break-all;margin:4px 0 8px;display:none;"></div>
+                <button type="button" class="btn-s" onclick="cancelGoogleAuth()" style="padding:5px 14px;font-size:11px;">Cancel</button>
             </div>
             <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:10px;color:var(--text-dim);text-align:center;">
                 Free plan: 1 active device • Pro: 5 devices • Team: unlimited
@@ -424,11 +420,7 @@
         }
 
         function hideAuth() {
-            if (deviceCodePollTimer) {
-                clearInterval(deviceCodePollTimer);
-                deviceCodePollTimer = null;
-            }
-            resetDeviceCodeView();
+            cancelGoogleAuth();
             document.getElementById('auth-overlay').classList.add('hidden');
         }
 
@@ -475,10 +467,10 @@
             });
         }
 
-        const GOOGLE_CLIENT_ID = '351826158810-u83koaotidtang1bc769gi41hrou9ml9.apps.googleusercontent.com';
-        let deviceCodePollTimer = null;
+        let googleAuthTimer = null;
+        let googleAuthPoll = null;
 
-        async function signInWithGoogle() {
+        function signInWithGoogle() {
             const errorEl = document.getElementById('auth-error');
             if (!fbAuth) {
                 errorEl.innerText = 'Authentication is unavailable (Firebase failed to load)';
@@ -486,133 +478,73 @@
             }
             errorEl.innerText = '';
 
-            // Switch to device code view
+            // Switch to Google auth status view
             document.querySelector('#auth-overlay form').style.display = 'none';
-            const dcSection = document.getElementById('device-code-section');
-            dcSection.style.display = 'block';
-            dcSection.classList.remove('hidden');
-            document.getElementById('device-user-code').innerText = '';
-            setDeviceStatus('Starting Google sign-in...');
+            const statusView = document.getElementById('google-auth-status');
+            statusView.style.display = 'block';
+            statusView.classList.remove('hidden');
+            document.getElementById('google-auth-msg').innerText = 'Preparing sign-in...';
+            document.getElementById('google-auth-url-text').style.display = 'none';
 
-            try {
-                // Request device code via relay server (avoids CORS issues from data: URI)
-                const resp = await fetch(relayUrl + '/api/auth/device-code', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ client_id: GOOGLE_CLIENT_ID })
-                });
-                const data = await resp.json();
+            const sessionId = 'seelo_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+            const authUrl = relayUrl + '/oauth-callback?sessionId=' + encodeURIComponent(sessionId);
 
-                if (data.error) {
-                    setDeviceStatus(data.error_description || data.error, true);
-                    return;
-                }
+            // Pre-warm relay server
+            fetch(relayUrl + '/api/health', { mode: 'no-cors' }).catch(() => {});
 
-                const { device_code, user_code, interval } = data;
+            googleAuthTimer = setTimeout(() => {
+                document.getElementById('google-auth-msg').innerHTML =
+                    'A new browser tab should open. Sign in with Google there, then return here.';
 
-                // Show the code to the user — they visit google.com/device on any device
-                document.getElementById('device-user-code').innerText = user_code;
-                setDeviceStatus('Waiting — enter the code on google.com/device');
+                // 1) figma.openExternal via parent.postMessage
+                parent.postMessage({ pluginMessage: { type: 'open-external', url: authUrl } }, '*');
 
-                // Poll relay server for the token (relay proxies to Google)
-                deviceCodePollTimer = setInterval(async () => {
+                // 2) window.open fallback
+                try { window.open(authUrl, '_blank'); } catch (_) {}
+
+                // 3) Show clickable URL as last resort
+                const urlText = document.getElementById('google-auth-url-text');
+                urlText.innerHTML = 'If nothing opens, <a href="' + authUrl.replace(/&/g,'&amp;') + '" target="_blank" style="color:#6366f1;">click here</a>';
+                urlText.style.display = 'block';
+
+                // Start polling relay for auth result
+                let pollCount = 0;
+                googleAuthPoll = setInterval(async () => {
+                    pollCount++;
+                    if (pollCount > 90) { // 3 min timeout
+                        clearInterval(googleAuthPoll);
+                        googleAuthPoll = null;
+                        document.getElementById('google-auth-msg').innerText = 'Timed out. Click Cancel and try again.';
+                        return;
+                    }
                     try {
-                        const tokenResp = await fetch(relayUrl + '/api/auth/device-token', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                client_id: GOOGLE_CLIENT_ID,
-                                device_code: device_code
-                            })
-                        });
-                        const tokenData = await tokenResp.json();
-
-                        if (tokenData.error === 'authorization_pending' || tokenData.error === 'slow_down') {
-                            return;
-                        }
-
-                        if (tokenData.error) {
-                            clearInterval(deviceCodePollTimer);
-                            deviceCodePollTimer = null;
-                            setDeviceStatus(tokenData.error_description || tokenData.error, true);
-                            return;
-                        }
-
-                        clearInterval(deviceCodePollTimer);
-                        deviceCodePollTimer = null;
-
-                        if (!tokenData.id_token) {
-                            setDeviceStatus('No ID token received — try again.', true);
-                            return;
-                        }
-
-                        setDeviceStatus('Signing in...');
-
-                        // Try signInWithCredential first (just an API call — should work in data: URI)
-                        try {
-                            const credential = firebase.auth.GoogleAuthProvider.credential(tokenData.id_token);
-                            await fbAuth.signInWithCredential(credential);
-                            hideAuth();
-                            resetDeviceCodeView();
-                        } catch (credErr) {
-                            // Fallback: same relay server → Firebase custom token
-                            try {
-                                const relayResp = await fetch(relayUrl + '/api/auth/google-token', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ idToken: tokenData.id_token })
-                                });
-                                const relayData = await relayResp.json();
-                                if (relayData.customToken) {
-                                    await fbAuth.signInWithCustomToken(relayData.customToken);
-                                    hideAuth();
-                                    resetDeviceCodeView();
-                                } else {
-                                    setDeviceStatus('Sign-in failed. Try email/password.', true);
-                                }
-                            } catch (relayErr) {
-                                setDeviceStatus('Sign-in failed. Try email/password instead.', true);
+                        const resp = await fetch(relayUrl + '/api/auth/session?sessionId=' + encodeURIComponent(sessionId));
+                        const data = await resp.json();
+                        if (data.status === 'complete') {
+                            clearInterval(googleAuthPoll);
+                            googleAuthPoll = null;
+                            if (data.customToken && fbAuth) {
+                                await fbAuth.signInWithCustomToken(data.customToken);
                             }
+                            hideAuth();
+                            resetGoogleAuthView();
                         }
-                    } catch (_) {
-                        // network retry — keep polling
-                    }
+                    } catch (_) {}
                 }, 2000);
-
-                // Timeout after 5 minutes
-                setTimeout(() => {
-                    if (deviceCodePollTimer) {
-                        clearInterval(deviceCodePollTimer);
-                        deviceCodePollTimer = null;
-                        setDeviceStatus('Timed out — close and try again.', true);
-                    }
-                }, 5 * 60 * 1000);
-
-            } catch (e) {
-                setDeviceStatus('Could not reach relay server. Check your connection.', true);
-            }
+            }, 1500);
         }
 
-        function setDeviceStatus(msg, isError) {
-            const el = document.getElementById('device-status');
-            el.innerHTML = msg;
-            el.style.color = isError ? '#ef4444' : '';
+        function cancelGoogleAuth() {
+            if (googleAuthPoll) { clearInterval(googleAuthPoll); googleAuthPoll = null; }
+            if (googleAuthTimer) { clearTimeout(googleAuthTimer); googleAuthTimer = null; }
+            resetGoogleAuthView();
         }
 
-        function cancelDeviceCode() {
-            if (deviceCodePollTimer) {
-                clearInterval(deviceCodePollTimer);
-                deviceCodePollTimer = null;
-            }
-            resetDeviceCodeView();
-        }
-
-        function resetDeviceCodeView() {
+        function resetGoogleAuthView() {
             document.querySelector('#auth-overlay form').style.display = '';
-            const dc = document.getElementById('device-code-section');
-            dc.style.display = 'none';
-            dc.classList.add('hidden');
-            document.getElementById('device-status').style.color = '';
+            const gs = document.getElementById('google-auth-status');
+            gs.style.display = 'none';
+            gs.classList.add('hidden');
             document.getElementById('auth-error').innerText = '';
         }
 
