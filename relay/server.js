@@ -152,6 +152,36 @@ app.get('/api/auth/session', (req, res) => {
   });
 });
 
+// Google ID token → Firebase custom token (fallback for plugin signInWithCredential)
+app.post('/api/auth/google-token', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(400).json({ error: 'Missing idToken' });
+  try {
+    const apiKey = process.env.FIREBASE_API_KEY || 'AIzaSyBS6bV8-6kC8bEsEOs5k2kMtPUEqhaYCbQ';
+    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestUri: 'http://localhost',
+        postBody: `id_token=${idToken}&providerId=google.com`,
+        returnSecureToken: true,
+      }),
+    });
+    const data = await r.json();
+    if (data.error) {
+      return res.status(401).json({ error: data.error.message || 'Token verification failed' });
+    }
+    const uid = data.localId;
+    const customToken = await admin.auth().createCustomToken(uid);
+    // Ensure user exists in store
+    const user = store.getUser(uid);
+    user.email = data.email || user.email;
+    res.json({ success: true, customToken, uid, email: data.email || '' });
+  } catch (e) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // --- Subscription API ---
 
 // Verify Firebase ID token
